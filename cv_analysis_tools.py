@@ -215,3 +215,62 @@ class CVAnalysisTools():
       self.textures[label] = lbp
 
   ###############################################
+  def get_lines(self, img):
+    
+      imglines = cv2.Canny(img, 50, 200, None, 3)
+      edges = cv2.Canny(img,100,200)
+      # Copy edges to the images that will display the results in BGR
+      imglinesp = np.copy(img)
+      linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 10, 10)
+      if linesP is not None:
+          print("num linesP:", len(linesP))
+          for i in range(0, len(linesP)):
+              l = linesP[i][0]
+              cv2.line(imglinesp, (l[0], l[1]), (l[2], l[3]), (0,255,0), 3, cv2.LINE_AA)
+      return linesP, imglinesp
+
+  def get_border_lines(self, img):
+      # the following is not what we're looking for mapping, but may serve 
+      # as a prototype for now. The following cuts away more than the borders
+      # to get a clean image. We just want to know what the external borders are.
+      #
+      # convert the stitched image to grayscale and threshold it
+      # such that all pixels greater than zero are set to 255
+      # (foreground) while all others remain 0 (background)
+      gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+      thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)[1]
+      # find all external contours in the threshold image then find
+      # the *largest* contour which will be the contour/outline of
+      # the image
+      cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
+      	cv2.CHAIN_APPROX_SIMPLE)
+      cnts = imutils.grab_contours(cnts)
+      c = max(cnts, key=cv2.contourArea)
+      # allocate memory for the mask which will contain the
+      # rectangular bounding box of the image region
+      mask = np.zeros(thresh.shape, dtype="uint8")
+      (x, y, w, h) = cv2.boundingRect(c)
+      cv2.rectangle(mask, (x, y), (x + w, y + h), 255, -1)
+      # create two copies of the mask: one to serve as our actual
+      # minimum rectangular region and another to serve as a counter
+      # for how many pixels need to be removed to form the minimum
+      # rectangular region
+      minRect = mask.copy()
+      sub = mask.copy()
+      # keep looping until there are no non-zero pixels left in the
+      # subtracted image
+      while cv2.countNonZero(sub) > 0:
+      	# erode the minimum rectangular mask and then subtract
+      	# the thresholded image from the minimum rectangular mask
+      	# so we can count if there are any non-zero pixels left
+      	minRect = cv2.erode(minRect, None)
+      	sub = cv2.subtract(minRect, thresh)
+      # find contours in the minimum rectangular mask and then
+      # extract the bounding box (x, y)-coordinates
+      cnts = cv2.findContours(minRect.copy(), cv2.RETR_EXTERNAL,
+      	cv2.CHAIN_APPROX_SIMPLE)
+      cnts = imutils.grab_contours(cnts)
+      c = max(cnts, key=cv2.contourArea)
+      (x, y, w, h) = cv2.boundingRect(c)
+      return (x, y, w, h) 
+

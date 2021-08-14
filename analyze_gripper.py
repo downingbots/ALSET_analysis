@@ -63,3 +63,7 @@ class AnalyzeGripper():
       self.prev_frame_num = frame_num
       self.prev_action = action
          
+
+  def check_cube_in_gripper(self, frame_num, action, prev_img, curr_img, done):
+      pass
+
