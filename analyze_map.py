@@ -323,6 +323,49 @@ class AnalyzeMap():
         # perform the actual rotation and return the image
         return cv2.warpAffine(image, M, (nW, nH), borderMode=cv2.BORDER_CONSTANT)
 
+    def real_map_border(self, mapimg):
+        # convert the stitched image to grayscale and threshold it
+        # such that all pixels greater than zero are set to 255
+        # (foreground) while all others remain 0 (background)
+        gray = cv2.cvtColor(mapimg, cv2.COLOR_BGR2GRAY)
+        thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)[1]
+        # find all external contours in the threshold image then find
+        # the *largest* contour which will be the contour/outline of
+        # the stitched image
+        cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
+        	cv2.CHAIN_APPROX_SIMPLE)
+        cnts = imutils.grab_contours(cnts)
+        c = max(cnts, key=cv2.contourArea)
+        # allocate memory for the mask which will contain the
+        # rectangular bounding box of the stitched image region
+        mask = np.zeros(thresh.shape, dtype="uint8")
+        (x, y, w, h) = cv2.boundingRect(c)
+        cv2.rectangle(mask, (x, y), (x + w, y + h), 255, -1)
+        # create two copies of the mask: one to serve as our actual
+        # minimum rectangular region and another to serve as a counter
+        # for how many pixels need to be removed to form the minimum
+        # rectangular region
+        minRect = mask.copy()
+        sub = mask.copy()
+        # keep looping until there are no non-zero pixels left in the
+        # subtracted image
+        while cv2.countNonZero(sub) > 0:
+        	# erode the minimum rectangular mask and then subtract
+        	# the thresholded image from the minimum rectangular mask
+        	# so we can count if there are any non-zero pixels left
+        	minRect = cv2.erode(minRect, None)
+        	sub = cv2.subtract(minRect, thresh)
+        # find contours in the minimum rectangular mask and then
+        # extract the bounding box (x, y)-coordinates
+        cnts = cv2.findContours(minRect.copy(), cv2.RETR_EXTERNAL,
+        	cv2.CHAIN_APPROX_SIMPLE)
+        cnts = imutils.grab_contours(cnts)
+        c = max(cnts, key=cv2.contourArea)
+        # print("bounding countour:", cnts)
+        (x, y, w, h) = cv2.boundingRect(c)
+        return cnts, (x, y, w, h)
+
+
     ###########
 
     def create_map(self, frame_num, action, prev_img_pth, curr_img_pth, done):
@@ -334,7 +377,7 @@ class AnalyzeMap():
         # avg (x,y) dif, var:  (2.37,1.62) (1715,423)
         pts = np.array([(0,0),(w,0),(w*28/32,h*21/32),(w*4/32,h*21/32)], dtype = "float32")
         # print("w,h:", w,h)
-        # print("pts:", pts)
+        print("pts:", pts)
         # apply the four point tranform to obtain a "birds eye view" of the image
         above_view = self.four_point_transform(curr_image, pts)
         self.move_state(action, above_view)
@@ -385,6 +428,8 @@ class AnalyzeMap():
             # ORB use BRIEF descriptors. But BRIEF performs poorly with rotation.
             # at this point, the rotated keypoints on the warped new_map can't be compared 
             # the map's keypoints.
+            print("real map border:",  self.real_map_border(self.map))
+            print("real new map border:",  self.real_map_border(new_map))
 
             # The good news is that the SIFT patent has expired and can be used.
             # Try Panaramic stitching.
@@ -397,6 +442,7 @@ class AnalyzeMap():
             # stitching
             if status == 0:
               stitch_rows,stitch_cols,stitch_ch = stitched.shape
+              print("real stitched border:",  self.real_map_border(stitched))
               print("stitch rows,cols:", (stitch_rows, stitch_cols), (self.map_rows, self.map_cols), (new_rows, new_cols))
               # write the output stitched image to disk
               # cv2.imwrite(args["output"], stitched)
