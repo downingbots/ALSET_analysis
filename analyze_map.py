@@ -335,6 +335,8 @@ class AnalyzeMap():
         cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
         	cv2.CHAIN_APPROX_SIMPLE)
         cnts = imutils.grab_contours(cnts)
+        if len(cnts) < 3:
+          return [], (None, None, None, None)
         c = max(cnts, key=cv2.contourArea)
         # allocate memory for the mask which will contain the
         # rectangular bounding box of the stitched image region
