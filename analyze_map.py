@@ -10,6 +10,7 @@ from imutils import paths
 import imutils
 from matplotlib import pyplot as plt
 from cv_analysis_tools import *
+from stitching import *
 
 # based on: 
 # https://www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
@@ -335,14 +336,17 @@ class AnalyzeMap():
         cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
         	cv2.CHAIN_APPROX_SIMPLE)
         cnts = imutils.grab_contours(cnts)
-        if len(cnts) < 3:
-          return [], (None, None, None, None)
-        c = max(cnts, key=cv2.contourArea)
+        try:
+          c = max(cnts, key=cv2.contourArea)
+        except Exception as e:
+            print("Error A: max(cnts, key=cv2.contourArea):", e)
+            return [], (None, None, None, None)
         # allocate memory for the mask which will contain the
         # rectangular bounding box of the stitched image region
         mask = np.zeros(thresh.shape, dtype="uint8")
         (x, y, w, h) = cv2.boundingRect(c)
         cv2.rectangle(mask, (x, y), (x + w, y + h), 255, -1)
+        print("rect:", x,y,w,h)
         # create two copies of the mask: one to serve as our actual
         # minimum rectangular region and another to serve as a counter
         # for how many pixels need to be removed to form the minimum
@@ -352,17 +356,25 @@ class AnalyzeMap():
         # keep looping until there are no non-zero pixels left in the
         # subtracted image
         while cv2.countNonZero(sub) > 0:
-        	# erode the minimum rectangular mask and then subtract
-        	# the thresholded image from the minimum rectangular mask
-        	# so we can count if there are any non-zero pixels left
-        	minRect = cv2.erode(minRect, None)
-        	sub = cv2.subtract(minRect, thresh)
+          # erode the minimum rectangular mask and then subtract
+          # the thresholded image from the minimum rectangular mask
+          # so we can count if there are any non-zero pixels left
+          print(minRect)
+          minRect = cv2.erode(minRect, None)
+          sub = cv2.subtract(minRect, thresh)
+        print(minRect)
         # find contours in the minimum rectangular mask and then
         # extract the bounding box (x, y)-coordinates
         cnts = cv2.findContours(minRect.copy(), cv2.RETR_EXTERNAL,
         	cv2.CHAIN_APPROX_SIMPLE)
+        print("cnts1:", cnts)
         cnts = imutils.grab_contours(cnts)
-        c = max(cnts, key=cv2.contourArea)
+        print("cnts2:", cnts)
+        try:
+          c = max(cnts, key=cv2.contourArea)
+        except Exception as e:
+          print("Error B: max(cnts, key=cv2.contourArea):", e)
+          return None, (None,None,None,None)
         # print("bounding countour:", cnts)
         (x, y, w, h) = cv2.boundingRect(c)
         return cnts, (x, y, w, h)
@@ -474,9 +486,14 @@ class AnalyzeMap():
               # cv2.waitKey(0)
               above_view1 = cv2.drawKeypoints(self.map,map_pts,None,color=(0,255,0), flags=0)
               above_view2 = cv2.drawKeypoints(new_map,new_map_pts,None,color=(0,255,0), flags=0)
+              cv2.imshow("map",above_view1)
+              cv2.imshow("new map",above_view2)
+              cv2.waitKey(0)
+              cv2.destroyAllWindows()
               for i, mpt in enumerate(map_pts):
                 new_pt = new_map_pts[i].pt
                 print(i,"kp dif:", (mpt.pt[0]-new_pt[0]), (mpt.pt[1]-new_pt[1]))
+                print(i,"kp dif:", (mpt.pt[0],mpt.pt[1]), (new_pt[0],new_pt[1]))
 
 
               ###################
@@ -508,7 +525,7 @@ class AnalyzeMap():
               ###################
               # line detection
               # note: includes black edges from border
-              if True:
+              if False:
                 linesP, imglinesp = self.cvu.get_lines(self.map)
                 cv2.imshow("Map LinesP - Probabilistic Line Transform", imglinesp);
                 linesP, imglinesp = self.cvu.get_lines(new_map)
@@ -517,7 +534,20 @@ class AnalyzeMap():
                 cv2.destroyAllWindows()
 
 
+              ###################
+              # Stitching - based on keypoints
+              # OpenCV stitching came up with something asthetically pleasing, but
+              # not accurate. 
+              ###################
+              # map_border = self.real_map_border(self.map)
+              # new_map_border = self.real_map_border(new_map)
+              s = Img_Stitch(self.map, new_map)
+              s.leftshift()
+              s.showImage('left')
+              s.rightshift()
+              
+              self.map = s.leftImage
+              self.map_rows,self.map_cols,self.map_ch = self.map.shape
+              self.map_sift = kp_sift(self.map)
+              self.map_arr = asarray(self.map)
 
-#            # self.map_arr = np.ndarray(self.map_arr).reshape(self.map_rows, self.map_cols)
-#            # self.map_arr = self.map_arr.reshape(self.map_rows, self.map_cols)
-#            # map_arr2 = self.map_arr.reshape(self.map_rows, self.map_cols)
