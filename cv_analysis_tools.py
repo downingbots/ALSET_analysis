@@ -216,17 +216,20 @@ class CVAnalysisTools():
 
   ###############################################
   def get_lines(self, img):
-    
-      imglines = cv2.Canny(img, 50, 200, None, 3)
-      edges = cv2.Canny(img,100,200)
+      # edges = cv2.Canny(img, 75, 200, None, 3)
+      edges = cv2.Canny(img, 50, 200, None, 3)
+      # edges = cv2.Canny(img,100,200)
       # Copy edges to the images that will display the results in BGR
       imglinesp = np.copy(img)
-      linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 10, 10)
+      # linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 10, 10)
+      linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 20, 20)
       if linesP is not None:
           print("num linesP:", len(linesP))
           for i in range(0, len(linesP)):
               l = linesP[i][0]
               cv2.line(imglinesp, (l[0], l[1]), (l[2], l[3]), (0,255,0), 3, cv2.LINE_AA)
+      # cv2.imshow("lines:", imglinesp)
+      # cv2.waitKey(0)
       return linesP, imglinesp
 
   def get_border_lines(self, img):

@@ -4,6 +4,7 @@ from func_app import *
 from analyze_gripper import *
 from analyze_move import *
 from analyze_map import *
+import gc
 
 class DSAnalysis():
   def __init__(self, app_name="TT", app_type="APP"):
@@ -235,6 +236,7 @@ class DSAnalysis():
   def dispatch(self, frame_num, action, prev_img, curr_img, done=False):
       print("curr_func_name: ", self.func_app.curr_func_name)
       print("predicted, actual:", self.move_analysis.predict(), action)
+      gc.collect()
       self.move_analysis.add_next_move(action)
       if self.func_app.curr_func_name == "PARK_ARM_RETRACTED":
         self.analyze_PARetracted(frame_num, action, prev_img, curr_img, done)

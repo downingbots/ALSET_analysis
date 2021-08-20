@@ -11,15 +11,20 @@ import imutils
 from matplotlib import pyplot as plt
 from cv_analysis_tools import *
 from stitching import *
+from shapely.geometry import *
 
 # based on: 
 # https://www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
 class AnalyzeMap():
     def __init__(self):
+        # self.stop_at_frame = 112
+        self.stop_at_frame = 1
         self.KPs = None
         self.map = None
         # real map array info
         # real map array sizes change over time
+        self.map_overlay = None
+        self.map_overlay_sift = None
         self.map_arr = None
         self.map_sift = None
         self.map_rows = None
@@ -44,12 +49,15 @@ class AnalyzeMap():
         self.VIRTUAL_MAP_SIZE = None
         self.virtual_map_center = None
         self.robot_location = None
+        self.robot_location_history = []
         self.robot_orientation = None
         self.robot_location_hist = []
         self.robot_orientation_hist = []
+        self.robot_gripper_pad_len = None
         self.clusters = []
         self.grabable_objects = []
         self.container_objects = []
+        self.last_line = None
         self.dif_avg = []
         self.dif_var = []
         self.min_pt = []
@@ -67,6 +75,9 @@ class AnalyzeMap():
         y = pt[1] + self.virtual_map_center[1] - self.VIRTUAL_MAP_SIZE/2
         return x,y
 
+    ######################
+    # Keypoint Transforms
+    ######################
     def order_points(self, pts):
         # initialzie a list of coordinates that will be ordered
         # such that the first entry in the list is the top-left,
@@ -131,10 +142,11 @@ class AnalyzeMap():
             avg_y_dif = 0
             x_dev = []
             y_dev = []
-            min_x = 1000000000000000000
-            max_x = -1000000000000000000
-            min_y = 1000000000000000000
-            max_y = -1000000000000000000
+            INFINITE = 10000000000000000000
+            min_x = INFINITE
+            max_x = -INFINITE
+            min_y = INFINITE
+            max_y = -INFINITE
             # check if use defaults
             if sift1 is None:
               sift1=self.map_sift
@@ -164,7 +176,7 @@ class AnalyzeMap():
             x_var = sum(x_dev) / num_kp_matches
             y_var = sum(y_dev) / num_kp_matches
 
-            print("avg x,y dif: ", avg_x_dif, avg_y_dif, x_var, y_var)
+            print("avg x,y dif: ", avg_x_dif, avg_y_dif, np.sqrt(x_var), np.sqrt(y_var))
             print("max/min x,y: ", [max_x, max_y],[min_x, min_y])
         else:
             print("insufficient keypoints")
@@ -179,9 +191,38 @@ class AnalyzeMap():
         self.curr_move_sift = kp_sift(self.curr_move)
         # TODO: compute distances for each action
 
-    def get_n_match_kps(self, matches, sift1, sift2, n, ret_kp=False):
+    def point_in_border(self,border,pt):
+       b = []
+       for bdr in border:
+         b.append(list(bdr[0]))
+       if len(b) == 4:
+          bufzone = 10
+          if (b[0][0]+bufzone <= pt[0] and b[0][1]+bufzone <= pt[1] and
+             b[1][0]+bufzone <= pt[0] and b[1][1]-bufzone >= pt[1] and
+             b[2][0]-bufzone >= pt[0] and b[2][1]-bufzone >= pt[1] and
+             b[3][0]+bufzone >= pt[0] and b[3][1]+bufzone <= pt[1]):
+             return True
+          else:
+             return False
+       elif len(b) > 4:
+        # Create Point objects
+        poly = self.border_to_polygon(border)
+        Pt = shapely.geometry.Point(pt[0],pt[1])
+        if Pt.within(poly):
+          print("Line within Poly")
+          return True
+        else:
+          print("Point not within Poly")
+          if Pt.touches(poly):
+            print("Line touches Poly")
+          return False
+       else:
+          return False
+
+    def get_n_match_kps(self, matches, sift1, sift2, n, ret_kp=False, border=None):
         sift1_kps = []
         sift2_kps = []
+        skipped=0
         # print("num matches: ", len(matches))
         for i,kpm in enumerate(matches):
           # print("queryIdx:", kpm[0].queryIdx, kpm[1].queryIdx)
@@ -191,26 +232,83 @@ class AnalyzeMap():
           # print("kp1t:",sift1.keypoints[kpm[0].queryIdx].pt)
           # print("kp2q:",sift2.keypoints[kpm[1].trainIdx].pt)
           # print("dist:", kpm[0].distance, kpm[1].distance)
-          if i >= n:
+          if i >= n+skipped:
             if not ret_kp:
               sift1_kps = np.float32(sift1_kps)
               sift2_kps = np.float32(sift2_kps)
             return sift1_kps, sift2_kps
           kp1 = sift1.keypoints[kpm[0].queryIdx]
           kp2 = sift2.keypoints[kpm[0].trainIdx]
-          if ret_kp:
-            sift1_kps.append(kp1)
-            sift2_kps.append(kp2)
+          if border is None or self.point_in_border(border,kp1.pt):
+            if ret_kp:
+              if kp1 not in sift1_kps and kp2 not in sift2_kps:
+                sift1_kps.append(kp1)
+                sift2_kps.append(kp2)
+              else:
+                skipped += 1
+            else:
+              if kp1.pt not in sift1_kps and kp2.pt not in sift2_kps:
+                sift1_kps.append(kp1.pt)
+                sift2_kps.append(kp2.pt)
+              else:
+                skipped += 1
           else:
-            sift1_kps.append(kp1.pt)
-            sift2_kps.append(kp2.pt)
-        print("insufficient matches: ", len(matches))
+            skipped += 1
+          ###
+        print("insufficient matches: ", (len(matches)-skipped))
         if not ret_kp:
           sift1_kps = np.float32(sift1_kps)
           sift2_kps = np.float32(sift2_kps)
         return sift1_kps, sift2_kps
 
-    ###########
+    ############################
+    # MAP KEYPOINT ANALYSIS FUNCTIONS
+    ############################
+
+    def evaluate_map_kp_offsets(self, map_sift, new_map_rot):
+        shape, map_border = self.real_map_border(new_map_rot)
+        new_map_rot_sift = kp_sift(new_map_rot)
+        good_matches,notsogood = map_sift.compare_kp(new_map_rot_sift)
+        print("len good matches:", len(good_matches))
+        map_pts, new_map_rot_pts = self.get_n_match_kps(good_matches, map_sift, new_map_rot_sift, 6, ret_kp=True, border=map_border)
+        delta_x, delta_y = 0,0
+        x,y = 0,1
+        for i, map_pt in enumerate(map_pts):
+          # weight the deltas
+          # weight = len(map_pts) - i
+          # delta_x += weight*(map_pt.pt[x] - new_map_rot_pts[i].pt[x])
+          # Problem: what if only 5KP are returned? Then weighted delta computed based upon
+          #   6KP would be wrong.  Could store 6 deltas from prev run, and add in missing KPs
+          print("map_pt", map_pt, new_map_rot_pts)
+          delta_x += (map_pt.pt[x] - new_map_rot_pts[i].pt[x])
+          delta_y += (map_pt.pt[y] - new_map_rot_pts[i].pt[y])
+        if len(map_pts) > 0:
+          delta_x = int(delta_x / len(map_pts))
+          delta_y = int(delta_y / len(map_pts))
+        return delta_x, delta_y, map_pts, new_map_rot_pts
+
+    ##############
+    # find_best_kp_angle():
+    #   map is the full composite map
+    #   new map is the new robot image to be integrated into the full map
+    def find_best_kp_angle(self, map_sift, new_map, start_angle, num_angles, delta_deg):
+      x = 0
+      y = 1
+      best_kp_angle, best_kp_delta_x, best_kp_delta_y = None, None, None
+      best_map_pts, best_new_map_pts = None, None
+      for i in range(num_angles):
+        angle = start_angle + delta_deg*i
+        new_map_rot = self.rotate_about_robot(new_map, angle)
+        delta_x, delta_y, map_pts, new_map_rot_pts = self.evaluate_map_kp_offsets(map_sift, new_map_rot)
+        if len(map_pts) > 0 and (best_kp_delta_x is None or delta_x < best_kp_delta_x):
+            best_kp_angle, best_kp_delta_x, best_kp_delta_y = angle, delta_x, delta_y 
+            best_map_pts, best_new_map_pts = map_pts, new_map_rot_pts
+            print("new best kp angle:",best_map_pts,best_new_map_pts)
+      return best_kp_angle, best_kp_delta_x, best_kp_delta_y, best_map_pts, best_new_map_pts
+
+    #########################
+    # Contours
+    #########################
     def get_contours(self,img):
         blurred = cv2.GaussianBlur(img, (5, 5), 0)
         gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
@@ -235,58 +333,9 @@ class AnalyzeMap():
             # cv2.putText(img, itext, (cX, cY),
             #       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
 
-    def contours_difs(self, img,cnt1, cnt2):
-        def ci_dist(ci1,ci2):
-          x1 = ci1[0][0][0] 
-          x2 = ci2[0][0][0] 
-          y1 = ci1[0][0][1] 
-          y2 = ci2[0][0][1]
-          return np.sqrt((x1-x2)**2+(y1-y2)**2)
-        c1_match = []
-        c1_unmatched = []
-        c1_min = []
-        c1_dist = []
-        for i,c1 in enumerate(cnt1):
-          ci1 = c1.astype("int")
-          c1_min_dist = 1000000000000000
-          c1_min_val = None
-          found = False
-          for i,c2 in enumerate(cnt2):
-            ci2 = c2.astype("int")
-            # print( ci1[0][0][0], ci2[0][0][1])
-            if ci1[0][0][0] == ci2[0][0][0] and ci1[0][0][1] == ci2[0][0][1]:
-              found = True
-              c1_match.append(ci1)
-              break
-            elif c1_min_dist > ci_dist(ci1,ci2):
-              c1_min_dist = ci_dist(ci1,ci2)
-              c1_min_val = ci2
-          if not found:
-              c1_unmatched.append(ci1)
-              c1_min.append(c1_min_val)
-        # self.draw_contours(img,c1_match)
-        # self.draw_contours(img,c1_unmatched,def_clr=(255,0,0))
-        x_dist = 0
-        y_dist = 0
-        x_dev = []
-        y_dev = []
-        for i,c1 in enumerate(c1_min):
-          dx = c1[0][0][0] - cnt1[i][0][0][0]  
-          dy = c1[0][0][1] - cnt1[i][0][0][1]
-          x_dist += dx
-          y_dist += dy
-          x_dev.append(dx)
-          y_dev.append(dy)
-        x_dist /= len(c1_min)
-        y_dist /= len(c1_min)
-        x_dev = [(x_dev[i] - x_dist) ** 2 for i in range(len(x_dev))]
-        y_dev = [(y_dev[i] - y_dist) ** 2 for i in range(len(y_dev))]
-        x_var = sum(x_dev) / len(x_dev)
-        y_var = sum(y_dev) / len(y_dev)
-        print("Contour: avg dist,var:", (x_dist, y_dist), (x_var, y_var))
-        self.draw_contours(img,c1_min,def_clr=(255,0,0))
-        return c1_match, c1_unmatched, c1_min
-   
+    #########################
+    # Border manipulation
+    #########################
     def add_border(self, img, bordersize):
         print("bordersize:", bordersize, img.shape[:2])
         row, col = img.shape[:2]
@@ -304,27 +353,64 @@ class AnalyzeMap():
         )
         return border
 
-    def rotate_bound(self, image, M):
-        # ARD: assumes rotate over center, (not correct)
-        # grab the dimensions of the image and then determine the
-        # center
-        (h, w) = image.shape[:2]
-        (cX, cY) = (w // 2, h // 2)
-        # grab the rotation matrix (applying the negative of the
-        # angle to rotate clockwise), then grab the sine and cosine
-        # (i.e., the rotation components of the matrix)
-        cos = np.abs(M[0, 0])
-        sin = np.abs(M[0, 1])
-        # compute the new bounding dimensions of the image
-        nW = int((h * sin) + (w * cos))
-        nH = int((h * cos) + (w * sin))
-        # adjust the rotation matrix to take into account translation
-        M[0, 2] += (nW / 2) - cX
-        M[1, 2] += (nH / 2) - cY
-        # perform the actual rotation and return the image
-        return cv2.warpAffine(image, M, (nW, nH), borderMode=cv2.BORDER_CONSTANT)
+    def border_to_polygon(self, border):
+        b = []
+        for bdr in border:
+          b.append(list(bdr[0]))
+        poly = Polygon(b)
+        return poly
 
-    def real_map_border(self, mapimg):
+    def get_min_max_borders(self, border):
+        b = []
+        for bdr in border:
+          b.append(list(bdr[0]))
+        print("get_min_max:", b, border)
+        maxx = max(b[0][0], b[1][0], b[2][0], b[3][0])
+        minx = min(b[0][0], b[1][0], b[2][0], b[3][0])
+        maxy = max(b[0][1], b[1][1], b[2][1], b[3][1])
+        miny = min(b[0][1], b[1][1], b[2][1], b[3][1])
+        return maxx, minx, maxy, miny
+
+    def replace_border(self, img, desired_rows, desired_cols, offset_rows, offset_cols):
+        shape, border = self.real_map_border(img)
+        maxx, minx, maxy, miny = self.get_min_max_borders(border)
+        orig_row, orig_col = img.shape[:2]
+        print("shapes:", orig_row,orig_col,minx,maxx,miny,maxy)
+        extract_img_rect = img[miny:maxy, minx:maxx]
+        extracted_rows, extracted_cols = extract_img_rect.shape[:2]
+        border_top = int((desired_rows - extracted_rows)/2) + offset_rows
+        border_bottom = desired_rows - border_top - extracted_rows
+        border_left = int((desired_cols - extracted_cols)/2) + offset_cols
+        border_right = desired_cols - border_left - extracted_cols
+        print("replace_border:",border_top, border_bottom, border_left, border_right)
+        bordered_img = cv2.copyMakeBorder(
+            extract_img_rect,
+            top=border_top,
+            bottom=border_bottom,
+            left=border_left,
+            right=border_right,
+            borderType=cv2.BORDER_CONSTANT,
+            value=[0, 0, 0]  # black
+        )
+        return bordered_img
+
+
+    # angle = int(math.atan((y1-y2)/(x2-x1))*180/math.pi)
+
+    # image is "new map" == the transformed "curr move" with border
+    # center is about 4xfinger pads -> self.robot_location
+    def rotate_about_robot(self, image, angle):
+        # Draw the text using cv2.putText()
+        # Rotate the image using cv2.warpAffine()
+        M = cv2.getRotationMatrix2D(self.robot_location, angle, 1)
+        print("angle,M:", angle, M)
+        out = cv2.warpAffine(image, M, (image.shape[1], image.shape[0]))
+        # Display the results
+        # cv2.imshow('rotate about robot', out)
+        # cv2.waitKey(0)
+        return out
+
+    def real_map_border(self, mapimg, ret_outside=True):
         # convert the stitched image to grayscale and threshold it
         # such that all pixels greater than zero are set to 255
         # (foreground) while all others remain 0 (background)
@@ -333,54 +419,293 @@ class AnalyzeMap():
         # find all external contours in the threshold image then find
         # the *largest* contour which will be the contour/outline of
         # the stitched image
-        cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
-        	cv2.CHAIN_APPROX_SIMPLE)
-        cnts = imutils.grab_contours(cnts)
-        try:
-          c = max(cnts, key=cv2.contourArea)
-        except Exception as e:
-            print("Error A: max(cnts, key=cv2.contourArea):", e)
-            return [], (None, None, None, None)
-        # allocate memory for the mask which will contain the
-        # rectangular bounding box of the stitched image region
-        mask = np.zeros(thresh.shape, dtype="uint8")
-        (x, y, w, h) = cv2.boundingRect(c)
-        cv2.rectangle(mask, (x, y), (x + w, y + h), 255, -1)
-        print("rect:", x,y,w,h)
-        # create two copies of the mask: one to serve as our actual
-        # minimum rectangular region and another to serve as a counter
-        # for how many pixels need to be removed to form the minimum
-        # rectangular region
-        minRect = mask.copy()
-        sub = mask.copy()
-        # keep looping until there are no non-zero pixels left in the
-        # subtracted image
-        while cv2.countNonZero(sub) > 0:
-          # erode the minimum rectangular mask and then subtract
-          # the thresholded image from the minimum rectangular mask
-          # so we can count if there are any non-zero pixels left
-          print(minRect)
-          minRect = cv2.erode(minRect, None)
-          sub = cv2.subtract(minRect, thresh)
-        print(minRect)
-        # find contours in the minimum rectangular mask and then
-        # extract the bounding box (x, y)-coordinates
-        cnts = cv2.findContours(minRect.copy(), cv2.RETR_EXTERNAL,
-        	cv2.CHAIN_APPROX_SIMPLE)
-        print("cnts1:", cnts)
-        cnts = imutils.grab_contours(cnts)
-        print("cnts2:", cnts)
-        try:
-          c = max(cnts, key=cv2.contourArea)
-        except Exception as e:
-          print("Error B: max(cnts, key=cv2.contourArea):", e)
-          return None, (None,None,None,None)
-        # print("bounding countour:", cnts)
-        (x, y, w, h) = cv2.boundingRect(c)
-        return cnts, (x, y, w, h)
+        if ret_outside:
+          imagecontours, _ = cv2.findContours(thresh,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+          # for each of the contours detected, the shape of the contours is approximated 
+          # using approxPolyDP() function and the contours are drawn in the image using 
+          # drawContours() function
+          for count in imagecontours:
+            epsilon = 0.01 * cv2.arcLength(count, True)
+            approximations = cv2.approxPolyDP(count, epsilon, True)
+            # e.g. [[[224 224]] [[252 372]] [[420 372]] [[447 224]]]
+            #the name of the detected shapes are written on the image
+            i, j = approximations[0][0] 
+            if len(approximations) == 3:
+              # cv2.putText(imageread, "Triangle", (i, j), cv2.FONT_HERSHEY_COMPLEX, 1, 0, 2)
+              shape = "Triangle"
+            elif len(approximations) == 4:
+              # cv2.putText(imageread,"Rectangle",(i,j),cv2.FONT_HERSHEY_COMPLEX,1,0,2)
+              shape = "Trapezoid"
+            elif len(approximations) == 5:
+              # cv2.putText(imageread,"Pentagon",(i,j),cv2.FONT_HERSHEY_COMPLEX,1,0,2)
+              shape = "Pentagon"
+            elif 6 < len(approximations) < 15:
+              # cv2.putText(imageread,"Ellipse",(i,j),cv2.FONT_HERSHEY_COMPLEX,1,0,2)
+              shape = "Ellipse"
+            else:
+              # cv2.putText(imageread,"Circle",(i,j),cv2.FONT_HERSHEY_COMPLEX,1,0,2)
+              shape = "Circle"
+            # print("map shape:", shape, approximations)
+            #displaying the resulting image as the output on the screen
+            # imageread = mapimg.copy()
+            # cv2.drawContours(thresh, [approximations], 0, (0), 3)
+            # cv2.imshow(shape, thresh)
+            # cv2.waitKey(0)
+            return shape, approximations
 
 
-    ###########
+    def line_in_border(self,border,pt0,pt1):
+      if len(border == 4):
+        maxx, minx, maxy, miny = self.get_min_max_borders(border)
+        bufzone = 25
+        if ((maxx-bufzone <= pt0[0] and maxx-bufzone <= pt1[0]) or 
+            (maxy-bufzone <= pt0[1] and maxy-bufzone <= pt1[1]) or 
+            (minx+bufzone >= pt0[0] and minx+bufzone >= pt1[0]) or 
+            (miny+bufzone >= pt0[1] and miny+bufzone >= pt1[1])):
+          print("not_in_border:",pt0,pt1)
+          return False
+        else:
+          print("in_border:",pt0,pt1)
+          return True
+      else:
+        # Create Point objects
+        poly = self.border_to_polygon(border)
+        line_a = LineString([pt0, pt1])
+        # if p0.within(poly) and p1.within(poly):
+        if line_a.within(poly):
+          print("Line within Poly")
+          return True
+        else:
+          print("Line not within Poly")
+          if line_a.intersects(poly):
+            print("Line intersects Poly")
+          if line_a.touches(poly):
+            print("Line touches Poly")
+          return False
+
+    #########################
+    # Map Line Analysis 
+    #########################
+    def analyze_map_lines(self, map):
+      linesP, imglinesp = self.cvu.get_lines(map)
+      # cv2.imshow("Map LinesP - Probabilistic Line Transform", imglinesp);
+      # cv2.waitKey(0)
+      print(linesP)
+      shape, map_border = self.real_map_border(map)
+      max_dist = 0
+      map_dx = None
+      map_dy = None
+      map_slope = None
+      # prefer choosing same line
+      if self.last_line is not None:
+        [ll0, ll1, ll2, ll3] = self.last_line
+        last_line_slope = (ll0 - ll2) / (ll1 - ll3)
+        last_line = LineString([(ll0,ll1),(ll2,ll3)])
+        min_diff = None
+        # slope_diff_thresh = .25
+        slope_diff_thresh = 1.25
+        for [[l0,l1,l2,l3]] in linesP:
+          if (l1-l3) == 0:
+            INFINITE = 10000000000000000000
+            map_slope = INFINITE
+          else:
+            map_slope = (l0 - l2) / (l1 - l3)
+          dist = np.sqrt((l0-l2)**2 + (l1-l3)**2)
+          print("slope diff:", abs(1 - (last_line_slope / map_slope)), map_slope)
+          if abs(1 - (last_line_slope / map_slope)) < slope_diff_thresh:
+            curr_line = LineString([(l0,l1),(l2,l3)])
+            map_line = [l0,l1,l2,l3]
+            if curr_line.intersects(last_line):
+              print("######## Found Map SlopeA #########")
+              print("map intercept")
+              return map_line, map_slope, dist
+            if curr_line.touches(last_line):
+              print("######## Found Map SlopeB #########")
+              print("map touches")
+              return map_line, map_slope, dist
+            # y = mx + b  ; b = y - mx
+            llb = ll1 - last_line_slope * ll0
+            mb = l1 - map_slope * l0
+            if abs(1 - (llb / mb)) < .02:
+              print("######## Found Map Slope1 #########")
+              print("map close", mb, llb)
+              return map_line, map_slope, dist
+            else:
+              print("potential line slope: M1,B1;M2,B2:", last_line_slope, llb, map_slope, mb)
+            if min_diff is None or min_diff > abs(1 - (llb / mb)):
+              min_diff = abs(1 - (llb / mb))
+              best_map_slope = map_slope
+              best_map_line = map_line
+              best_dist = dist
+              print("min slope:", min_diff, best_map_line, best_map_slope)
+        if min_diff is not None and min_diff < slope_diff_thresh:
+              print("######## Found Map Slope3 #########")
+              print("best last slope:", best_map_line, best_map_slope)
+              return best_map_line, best_map_slope, best_dist 
+          # fall through
+      # Find slope of longest line within the map border
+      for [[l0,l1,l2,l3]] in linesP:
+          if self.line_in_border(map_border, (l0,l1), (l2,l3)):
+            dx = l0 - l2
+            dy = l1 - l3
+            dist = np.sqrt(dx**2 + dy**2)
+            if max_dist < dist:
+              map_line = [l0,l1,l2,l3]
+              map_dx = dx
+              map_dy = dy
+              max_dist = dist
+      if map_dx is None or map_dy is None:
+          print("no map line")
+          return None, None, None
+      map_slope = map_dx / map_dy
+      self.last_line = map_line
+      print("longest line",map_line)
+      return map_line, map_slope, max_dist
+    
+    ##############
+    # find_best_line_angle()
+    ##############
+    # map is the full composite map
+    # new map is the new robot image to be integrated into the full map
+    def find_best_line_angle(self, map, map_slope, new_map, start_angle, num_angles, delta_deg):
+      min_slope_dif_angle = None
+      INFINITE = 10000000000000000000
+      min_slope_dif = INFINITE
+      best_line_angle = None
+      best_line = None
+      for i in range(num_angles):
+        angle = start_angle + delta_deg*i
+        new_map_rot = self.rotate_about_robot(new_map, angle)
+        shape, map_border = self.real_map_border(new_map_rot)
+        linesP, imglinesp = self.cvu.get_lines(new_map_rot)
+        # print(linesP)
+        for [[l0,l1,l2,l3]] in linesP:
+          if self.line_in_border(map_border, (l0,l1), (l2,l3)):
+            # print("l0-4:", l0,l1,l2,l3)
+            # print("map_slope:", map_slope)
+            dx = l0 - l2
+            dy = l1 - l3
+            dist = np.sqrt(dx**2 + dy**2)
+            if dy == 0:
+              diff_slope = INFINITE
+            else:
+              diff_slope = map_slope - (dx/dy)
+            # print("diff slope/min:", diff_slope, min_slope_dif)
+            if abs(diff_slope) < abs(min_slope_dif):
+              min_slope_dif = diff_slope
+              min_slope_dif_angle = angle
+              best_line = [l0,l1,l2,l3]
+              print("best line so far:", best_line, angle, diff_slope, "dxy:", map_slope, (dx/dy))
+      if min_slope_dif is None:
+        print("######## New Map Slope not found #########")
+      else:
+        print("######## New Map Slope found #########")
+        print("New Map info:", best_line, min_slope_dif_angle)
+      return best_line, min_slope_dif_angle
+    
+
+    # compare best Map Line to best "new map img" Line
+    # Two lines defined by: y = mx + b
+    # Function to find the vertical distance between parallel lines
+    # Adjust robot location to match
+    def adjustRobotLocationByLines(self, MapPt1, MapPt2, NewPt1, NewPt2):
+          x = 0
+          y = 1
+          # dx / dy
+          MapSlope = (MapPt1[x] - MapPt2[x]) / (MapPt1[y] - MapPt2[y])
+          NewSlope = (NewPt1[x] - NewPt2[x]) / (NewPt1[y] - NewPt2[y])
+          # b = y - Mx
+          MapB     = MapPt1[y] - MapSlope*MapPt1[x]
+          MapB2    = MapPt2[y] - MapSlope*MapPt2[x]
+          NewB     = NewPt1[y] - NewSlope*NewPt1[x]
+          NewB2    = NewPt2[y] - NewSlope*NewPt2[x]
+          print("MapB,B2; NewB,B2:", MapB, MapB2, NewB, NewB2, (MapB-NewB))
+          # x = (y - b)/M
+          MapXatRobot = (self.robot_location[y] - MapB) / MapSlope
+          NewXatRobot = (self.robot_location[y] - NewB) / NewSlope
+          NewXatRobot2= (self.robot_location[y] - MapB) / NewSlope
+          print("NewX, oldX:", NewXatRobot, NewXatRobot2)
+          # y = Mx + b
+          MapYatRobot = MapSlope * self.robot_location[x] + MapB
+          NewYatRobot = NewSlope * self.robot_location[x] + NewB
+          NewYatRobot2= NewSlope * self.robot_location[x] + MapB
+          # Note: same Robot Loc (x,y), diff angle
+          #
+          Ydif = NewYatRobot - NewYatRobot2  
+          # Ydif = MapYatRobot - NewYatRobot  
+          # self.robot_location[y] -= Ydif
+          # print("robot loc:", self.robot_location, Ydif, MapYatRobot, NewYatRobot, MapB, NewB)
+          # return Ydif
+          #
+          # Xdif = MapXatRobot - NewXatRobot  
+          Xdif = NewXatRobot2 - NewXatRobot
+          # self.robot_location[x] += Xdif
+          print("Xdif Ydiff: ", Xdif, Ydif)
+          # self.robot_location[y] = NewYatRobot2
+          self.robot_location_history.append([self.robot_location, "Parallel Line adjustment"])
+          print("robot loc:", self.robot_location, Xdif, MapXatRobot, NewXatRobot, MapB, NewB)
+          return Xdif
+                 
+    #########################
+    # Hardcoding / Manually tuning / gathering data to figure out algorithm
+    def manual_tuning(self, frame_num):
+        if frame_num == 112:
+          [off_x, off_y] = [0, 0] # best
+        if frame_num == 113:
+          # [off_x, off_y] = [15, -50]
+          # [off_x, off_y] = [-25, -10] raises it way too high
+          # [off_x, off_y] = [-5, -20]   much closer
+          # [off_x, off_y] = [0, -20]   gap on upper // increased
+          # [off_x, off_y] = [-5, -25] go lower/to left
+          # [off_x, off_y] = [0, -30]  good height/ need left
+          # [off_x, off_y] = [0, -40]  very close
+          [off_x, off_y] = [0, -45]  # best
+        if frame_num == 114:
+          # [off_x, off_y] = [0, -90] need right
+          # [off_x, off_y] = [10, -85] need lower
+          # [off_x, off_y] = [5, -85] need right
+          # [off_x, off_y] = [5, -80] close
+          # [off_x, off_y] = [5, -75] closer
+          # [off_x, off_y] = [10, -80]  
+          # [off_x, off_y] = [10, -75]  need higher
+          [off_x, off_y] = [5, -75]  # best so far
+          [off_x, off_y] = [3, -73]  # best so far
+        if frame_num == 115:
+          # can focus on the cube too
+          # to lower, increase x ; to right, decrease y
+          # [off_x, off_y] = [0, -75] # much closer, need lower
+          # [off_x, off_y] = [5, -55] # need lower, left
+          # [off_x, off_y] = [10, -60] # closer. need left
+          # [off_x, off_y] = [3, -73] # good, need lower
+          [off_x, off_y] = [8, -73] # good
+        if frame_num == 116:
+          [off_x, off_y] = [12, -65] # good
+        return off_x, off_y
+    
+    
+    #################################
+    # Map merging
+    #################################
+    def merge_maps(self, map, new_map):
+        map_shape, map_border = self.real_map_border(map)
+        new_map_shape, new_map_border = self.real_map_border(new_map)
+        # find overlap
+        map_maxx, map_minx, map_maxy, map_miny = self.get_min_max_borders(map_border)
+        new_map_maxx, new_map_minx, new_map_maxy, new_map_miny = self.get_min_max_borders(new_map_border)
+        final_map = map.copy()
+        for x in range(new_map_minx, new_map_maxx):
+          for y in range(new_map_miny, new_map_maxy):
+            if final_map[y,x].all() == 0:
+              final_map[y,x] = new_map[y,x]
+            elif new_map[y,x].all() == 0:
+              pass
+            else:
+              final_map[y,x] = .5*final_map[y,x] + .5*new_map[y,x]
+        return final_map
+    
+    #################################
+    # CREATE MAP - main map driver routine
+    #################################
 
     def create_map(self, frame_num, action, prev_img_pth, curr_img_pth, done):
         curr_image = cv2.imread(curr_img_pth)
@@ -390,6 +715,7 @@ class AnalyzeMap():
 
         # avg (x,y) dif, var:  (2.37,1.62) (1715,423)
         pts = np.array([(0,0),(w,0),(w*28/32,h*21/32),(w*4/32,h*21/32)], dtype = "float32")
+        self.robot_gripper_pad_len = (h * 11/32)
         # print("w,h:", w,h)
         print("pts:", pts)
         # apply the four point tranform to obtain a "birds eye view" of the image
@@ -401,153 +727,186 @@ class AnalyzeMap():
         # cv2.imshow("Original", image2)
         # cv2.imshow("Warped", above_view2 )
         # cv2.waitKey(0)
+        ###########################
+        # Initialize map with first frame.
+        ###########################
         if self.map is None:
           self.move_rows,self.move_cols,ch = self.curr_move.shape
           # add a big border
           self.border_buffer = max(self.move_rows,self.move_cols)*self.border_multiplier
-          print("border bufer:", self.border_buffer)
+          print("border buffer:", self.border_buffer)
           self.map = self.add_border(self.curr_move, self.border_buffer)
+          self.map_overlay = self.map.copy()
           self.map_rows,self.map_cols,self.map_ch = self.map.shape
           self.map_sift = kp_sift(self.map)
           self.map_arr = asarray(self.map)
 
-          self.robot_location = [(self.map_rows / 2+self.border_buffer), (self.border_buffer+self.map_cols)]
-          self.VIRTUAL_MAP_SIZE = self.border_buffer * 2 + self.map_rows
+          # center of rotation relative to "new map"
+          self.robot_location = [((self.map_rows / 2)+self.border_buffer), (self.border_buffer+3*self.robot_gripper_pad_len + self.map_cols)]
+
+          self.robot_location_history.append([self.robot_location, "Initial Guess"])
+          self.VIRTUAL_MAP_SIZE = self.border_buffer * 1 + self.map_rows
           self.map_virtual_map_center = self.VIRTUAL_MAP_SIZE / 2
           kp_matches,notsogood = self.map_sift.compare_kp(self.map_sift)
           print("num matches:", len(kp_matches))
           # orient to self
           map_pts, map_pts2 = self.get_n_match_kps(kp_matches, self.map_sift, self.map_sift, 3)
-          self.robot_orientation = cv.getAffineTransform(map_pts,map_pts)
+          self.robot_orientation = 0  # starting point in degrees
           print("orientation: ", self.robot_orientation)
+
+        ###########################
+        # Analyze and Integrate Each Subsequent Frame
+        ###########################
         else:
-            rows,cols,ch = self.curr_move.shape
-            new_map = self.add_border(self.curr_move, self.border_buffer)
-            new_map_sift = kp_sift(new_map)
-            # self.map_sift = kp_sift(self.map)
-            kp_matches,notsogood = self.map_sift.compare_kp(new_map_sift)
-            print("curr move:")
-            new_rows,new_cols,new_ch = new_map.shape
-            map_pts, new_map_pts = self.get_n_match_kps(kp_matches, self.map_sift, new_map_sift, 3)
-            self.dif_avg, self.dif_var, self.min_pt, self.max_pt = self.kp_match_stats(kp_matches, new_map_sift, self.map_sift)
-            print("new_map_pts:", new_map_pts)
-            print("mappts:", map_pts)
-            new_map_orientation = cv.getAffineTransform(map_pts, new_map_pts)
-            # cv2.imshow("map", self.map)
-            new_map = cv.warpAffine(new_map,new_map_orientation,(new_rows, new_cols), borderMode=cv2.BORDER_CONSTANT)
-            # new_map = self.rotate_bound(self.curr_move,M)
-            cv2.imshow("new_map", new_map)
-            # cv2.waitKey(0)
+          # initialize images and map for new move
+          rows,cols,ch = self.curr_move.shape
+          # cv2.imshow("curr_move:", self.curr_move)
+          new_map = self.add_border(self.curr_move, self.border_buffer)
+          # cv2.imshow("orig new_map:", new_map)
+          # test to see if Img_Stitch could handle rotation of new_map/curr_move.
+          # new_map2 = new_map.copy()
+          # new_map2 = self.curr_move.copy()
+          # cv2.imshow("new_map_border", new_map)
+          new_map_sift = kp_sift(new_map)
+          self.map_sift = kp_sift(self.map)
 
-            # ORB use BRIEF descriptors. But BRIEF performs poorly with rotation.
-            # at this point, the rotated keypoints on the warped new_map can't be compared 
-            # the map's keypoints.
-            print("real map border:",  self.real_map_border(self.map))
-            print("real new map border:",  self.real_map_border(new_map))
+          #####################################################################
+          # MAP OVERLAY APPROACH WITH IMAGE ROTATION AROUND ROBOT LOCATION
+          # Line Analysis, Keypoint Analysis
+          #####################################################################
+          # line detection and keypoint detection
+          # note: includes black edges from border
+          #################################
+          # Map Line Analysis 
+          # On a tabletop and roads, the edges are typically well deliniated and visible.
+          # For the initial tabletop apps, the line analysis has proven more reliable
+          # than the keypoint analysis, which is also used below.
+          #################################
+          x = 0
+          y = 1
+          map_line, map_slope, max_dist = self.analyze_map_lines(self.map_overlay)
+          if map_slope is not None:
+            new_map_img = new_map.copy()
+            # assuming all left turns
+            start_angle = self.robot_orientation - 2
+            best_line, best_line_angle = self.find_best_line_angle(self.map_overlay, 
+                                         map_slope, new_map_img, start_angle=start_angle,
+                                         num_angles=20, delta_deg=.5)
+            print("intermediate best line angle:", best_line_angle)
+            # after narrowing down to +-.5, fine tune angle to closest .1degree
+            if best_line_angle is not None:
+              best_line, best_line_angle = self.find_best_line_angle(self.map_overlay, 
+                              map_slope, new_map_img, start_angle=(best_line_angle - .5), 
+                              num_angles=9, delta_deg=.1)
+              print("final best line angle:", best_line_angle)
+            if best_line_angle is not None:
+              # compare best Map Line to best "new map img" Line
+              # Two lines defined by: y = mx + b
+              # Function to find the vertical distance between parallel lines
+              # Adjust robot location to match
+              rotated_new_map = new_map.copy()  # for resilience against bugs
+              rotated_new_map = self.rotate_about_robot(rotated_new_map, best_line_angle)
+              cv2.line(rotated_new_map, (best_line[0], best_line[1]), (best_line[2], best_line[3]), (0,255,0), 3, cv2.LINE_AA)
+              # cv2.imshow("Before adjust, rotated around robot", rotated_new_map)
+              Xdif = self.adjustRobotLocationByLines((map_line[0], map_line[1]), 
+                        (map_line[2], map_line[3]), (best_line[0], best_line[1]), 
+                        (best_line[2], best_line[3]))
+              self.robot_orientation = best_line_angle
+              print("best_line_angle, Xdif:", best_line_angle, Xdif)
 
-            # The good news is that the SIFT patent has expired and can be used.
-            # Try Panaramic stitching.
-            stitch_images = [self.map, new_map]
-  
-            stitcher = cv2.createStitcher() if imutils.is_cv3() else cv2.Stitcher_create()
-            # stitcher = Stitcher_create()
-            (status, stitched) = stitcher.stitch(stitch_images)
-            # if the status is '0', then OpenCV successfully performed image
-            # stitching
-            if status == 0:
-              stitch_rows,stitch_cols,stitch_ch = stitched.shape
-              print("real stitched border:",  self.real_map_border(stitched))
-              print("stitch rows,cols:", (stitch_rows, stitch_cols), (self.map_rows, self.map_cols), (new_rows, new_cols))
-              # write the output stitched image to disk
-              # cv2.imwrite(args["output"], stitched)
-	      # display the output stitched image to our screen
-              cv2.imshow("Stitched", stitched)
-              cv2.waitKey(0)
-              cv2.destroyAllWindows()
-            # otherwise the stitching failed, likely due to not enough keypoints)
-            # being detected
+              rotated_new_map = new_map.copy()  # for resilience against bugs
+              rotated_new_map = self.rotate_about_robot(rotated_new_map, best_line_angle)
+              rotated_new_map_disp = rotated_new_map.copy()
+              cv2.line(rotated_new_map_disp, (best_line[0], best_line[1]), (best_line[2], best_line[3]), (0,255,0), 3, cv2.LINE_AA)
             else:
-              print("[INFO] image stitching failed ({})".format(status))
-            if True:
-              self.map_sift = kp_sift(self.map)
-              new_map_sift = kp_sift(new_map)
-              # good_matches,notsogood = new_map_sift.compare_kp(self.map_sift,include_dist=False)
-              good_matches,notsogood = self.map_sift.compare_kp(new_map_sift,include_dist=False)
-              print("new map:")
-              self.dif_avg, self.dif_var, self.min_pt, self.max_pt = self.kp_match_stats(good_matches, self.map_sift, new_map_sift)
-              # self.dif_avg, self.dif_var, self.min_pt, self.max_pt = self.kp_match_stats(kp_matches, new_map_sift, self.map_sift)
-              map_pts, new_map_pts = self.get_n_match_kps(good_matches, self.map_sift, new_map_sift, 6, ret_kp=True)
+              ############################
+              # Keypoint Analysis 
+              # line analysis failed. Try to find initial rotation via keypoints
+              ############################
+              self.map_overlay_sift = kp_sift(self.map_overlay)
+              start_angle = .5
+              num_angles = 20
+              new_map_img = new_map.copy()
+              delta_deg = .5
+              best_kp_angle, best_kp_delta_x, best_kp_delta_y, map_pts, new_map_pts = self.find_best_kp_angle(self.map_overlay_sift, new_map_img, start_angle, num_angles, delta_deg)
+              if best_kp_angle is not None:
+                print(".5 delta Best KP angle/delta:", best_kp_angle,best_kp_delta_x,best_kp_delta_y)
+                start_angle = best_kp_angle - .5
+                num_angles = 9
+                delta_deg = .1
+                best_kp_angle, best_kp_delta, best_kp_delta_y, map_pts, new_map_pts = self.find_best_kp_angle(self.map_overlay_sift, new_map_img, start_angle, num_angles, delta_deg)
+                print("Final Best KP angle/delta:", best_kp_angle,best_kp_delta, best_kp_delta_y)
+                # best KP
+                print("map/new_map kps:", map_pts, new_map_pts)
+                rotated_new_map = new_map.copy()  # for resilience against bugs
+                rotated_new_map_disp = cv2.drawKeypoints(rotated_new_map, map_pts,None,color=(0,255,0), flags=0)
+                cv2.imshow("map kp", rotated_new_map_disp)
+                rotated_new_map = self.rotate_about_robot(rotated_new_map, best_kp_angle)
+                rotated_new_map_disp = rotated_new_map.copy()
+                rotated_new_map_disp = cv2.drawKeypoints(rotated_new_map_disp, new_map_pts,None,color=(0,255,0), flags=0)
+                cv2.imshow("best kp, rotated", rotated_new_map_disp)
 
-              # cv.drawMatchesKnn expects list of lists as matches.
-              # img3 = cv.drawMatchesKnn(self.map,self.map_sift.get_kp(),
-              #                     new_map,new_map_sift.get_kp(), good_matches, None,
-              #                     flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-              # cv2.imshow("keymaps1",img3)
-              # cv2.waitKey(0)
-              above_view1 = cv2.drawKeypoints(self.map,map_pts,None,color=(0,255,0), flags=0)
-              above_view2 = cv2.drawKeypoints(new_map,new_map_pts,None,color=(0,255,0), flags=0)
-              cv2.imshow("map",above_view1)
-              cv2.imshow("new map",above_view2)
-              cv2.waitKey(0)
-              cv2.destroyAllWindows()
-              for i, mpt in enumerate(map_pts):
-                new_pt = new_map_pts[i].pt
-                print(i,"kp dif:", (mpt.pt[0]-new_pt[0]), (mpt.pt[1]-new_pt[1]))
-                print(i,"kp dif:", (mpt.pt[0],mpt.pt[1]), (new_pt[0],new_pt[1]))
+            ##############
+            # Best Rotated Image found via line or KP analysis
+            # Next, Merge and display images
+            if best_line_angle is not None or best_kp_angle is not None:
+              print("frame_num:",frame_num)
+              # (self.border_buffer+3*self.robot_gripper_pad_len + self.map_cols)]
+              rotated_new_map = self.replace_border(rotated_new_map,
+                                  self.map_overlay.shape[0], self.map_overlay.shape[1],
+                                  0, 0)
+              cv2.imshow("rotate_new_mapkp", rotated_new_map_disp)
+              cv.waitKey(0)
 
+              off_x, off_y, map_pts, new_map_rot_pts = self.evaluate_map_kp_offsets(self.map_sift, rotated_new_map)
+              if len(map_pts) == 0:
+                print("keypoint tuning failed, fallback to manual tuning", frame_num)
+                off_x,off_y = self.manual_tuning(frame_num)
 
-              ###################
-              # _cnt => _contours
-              # due to image rotation, the contours get warped, so no easy way to 
-              # transform contours.
-              #
-              if False:
-                map_cnt = self.get_contours(self.map)
-                new_map_cnt = self.get_contours(new_map)
-                new_map_cnt_match, new_map_cnt_unmatched, new_map_cnt_min = self.contours_difs(above_view1, new_map_cnt, map_cnt)
-                map_cnt_match, map_cnt_unmatched, map_cnt_min = self.contours_difs(above_view2, map_cnt, new_map_cnt)
-                # self.draw_contours(above_view1, map_cnt, "av1:")
-                # self.draw_contours(above_view2, new_map_cnt, "av2:")
-
-              ###################
-              # Edge/line detection
-              # note: includes black edges from border
-              if False:
-                edges1 = cv2.Canny(self.map,100,200)
-                edges2 = cv2.Canny(new_map,100,200)
-                cv2.namedWindow("above1", cv2.WINDOW_NORMAL) 
-                cv2.namedWindow("above2", cv2.WINDOW_NORMAL) 
-                cv2.imshow("above1",edges1)
-                cv2.imshow("above2",edges1)
+              if frame_num >= self.stop_at_frame:
+                cv2.imshow("old overlay:", self.map_overlay)
+                rotated_new_map_disp = self.replace_border(rotated_new_map_disp,
+                                  self.map_overlay.shape[0], self.map_overlay.shape[1],
+                                  off_x,off_y)
+                cv2.imshow("after rotate and rebordering", rotated_new_map_disp)
+              rotated_new_map = self.replace_border(rotated_new_map,
+                                  self.map_overlay.shape[0], self.map_overlay.shape[1],
+                                  off_x,off_y)
+              # map_ovrly = cv2.addWeighted(self.map_overlay,0.5,rotated_new_map,0.5,0.5)
+              self.map_overlay = self.merge_maps(self.map_overlay, rotated_new_map)
+              if frame_num >= self.stop_at_frame:
+                map_ovrly = self.merge_maps(self.map_overlay, rotated_new_map_disp)
+                # cv2.line(map_ovrly, (map_line[0], map_line[1]), (map_line[2], map_line[3]), (0,255,0), 3, cv2.LINE_AA)
+                cv2.imshow("map overlay",map_ovrly)
+                # cv2.imshow("rotated around robot", rotated_new_map)
                 cv2.waitKey(0)
                 cv2.destroyAllWindows()
 
-              ###################
-              # line detection
-              # note: includes black edges from border
-              if False:
-                linesP, imglinesp = self.cvu.get_lines(self.map)
-                cv2.imshow("Map LinesP - Probabilistic Line Transform", imglinesp);
-                linesP, imglinesp = self.cvu.get_lines(new_map)
-                cv2.imshow("NewMap LinesP - Probabilistic Line Transform", imglinesp);
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
+          #####################################################################
+          # MAP STICHING APPROACH BASED UPON KEYPOINTS
+          # Problem when no matching keypoints!
+          #####################################################################
+          if False:
+            # Stitching - based on keypoints
+            # OpenCV stitching came up with something asthetically pleasing, but
+            # not accurate. 
+            ###################
+            # map_border = self.real_map_border(self.map)
+            # new_map_border = self.real_map_border(new_map)
+            s = Img_Stitch(self.map, new_map)
+            s.leftshift()
+            s.showImage('left')
+            s.rightshift()
+            self.map = s.leftImage
+            # Img_stitch: the rotation of the curr_move to map eventually fails
+            # s2 = Img_Stitch(self.map, new_map2)
+            # s2.leftshift()
+            # s2.showImage('left2')
+            # s2.rightshift()
+            # self.map = s2.leftImage
+            self.map = s.leftImage
+            self.map_rows,self.map_cols,self.map_ch = self.map.shape
+            self.map_sift = kp_sift(self.map)
+            self.map_arr = asarray(self.map)
 
-
-              ###################
-              # Stitching - based on keypoints
-              # OpenCV stitching came up with something asthetically pleasing, but
-              # not accurate. 
-              ###################
-              # map_border = self.real_map_border(self.map)
-              # new_map_border = self.real_map_border(new_map)
-              s = Img_Stitch(self.map, new_map)
-              s.leftshift()
-              s.showImage('left')
-              s.rightshift()
-              
-              self.map = s.leftImage
-              self.map_rows,self.map_cols,self.map_ch = self.map.shape
-              self.map_sift = kp_sift(self.map)
-              self.map_arr = asarray(self.map)
-
+          return
