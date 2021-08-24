@@ -4,6 +4,7 @@ from func_app import *
 from analyze_gripper import *
 from analyze_move import *
 from analyze_map import *
+from analyze_clusters import *
 import gc
 
 class DSAnalysis():
@@ -23,13 +24,15 @@ class DSAnalysis():
       # self.robot_analysis = AnalyzeRobot()
       ## find potential clusters including floor, keypoints, potential COIs, obstacles, BG movements
       ## runs YOLO9000, segmentation
-      # self.analyze_clusters = AnalyzeClusters()
+      self.analyze_clusters = AnalyzeClusters()
       ## create a map, containing robot location and orientation, clusters, objects
       self.map_analysis = AnalyzeMap()
       ## detailed analysis of cube
       # self.cube_analysis = AnalyzeCube()
       ## detailed analysis of box
       # self.box_analysis = AnalyzeBox
+      ## detailed analysis of box
+      # self.face_analysis = AnalyzeFace
       self.MAX_MOVES_REWARD = None
       self.parse_app_dataset()
 
@@ -242,11 +245,12 @@ class DSAnalysis():
         self.analyze_PARetracted(frame_num, action, prev_img, curr_img, done)
         print("curr_func_name: ", self.func_app.curr_func_name)
       elif self.func_app.curr_func_name == "QUICK_SEARCH_FOR_CUBE":
-        self.map_analysis.create_map(frame_num, action, prev_img, curr_img, done)
-#        self.analyze_clusters(frame_num, action, prev_img, curr_img, done)
+        self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+        self.analyze_clusters.analyze(frame_num, action, prev_img, curr_img, done)
+
       elif self.func_app.curr_func_name == "GOTO_CUBE":
 #        self.cube_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-        self.map_analysis.create_map(frame_num, action, prev_img, curr_img, done)
+        self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
       elif self.func_app.curr_func_name == "PICK_UP_CUBE":
 #        self.cube_analysis.analyze(frame_num, action, prev_img, curr_img, done)
 #        self.pickup_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)
@@ -255,11 +259,11 @@ class DSAnalysis():
         result = self.gripper_analysis.check_cube_in_gripper(frame_num, action, prev_img, curr_img, done)
       elif self.func_app.curr_func_name == "QUICK_SEARCH_FOR_BOX_WITH_CUBE":
 #        result = self.gripper_analysis.check_cube_in_gripper(frame_num, action, prev_img, curr_img, done)
-        self.map_analysis.create_map(frame_num, action, prev_img, curr_img, done)
+        self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
 #        self.analyze_clusters.analyze(frame_num, action, prev_img, curr_img, done)
       elif self.func_app.curr_func_name == "GOTO_BOX_WITH_CUBE":
 #        self.box_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)
-        self.map_analysis.create_map(frame_num, action, prev_img, curr_img, done)
+        self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
       elif self.func_app.curr_func_name == "DROP_CUBE_IN_BOX":
 #        result = self.gripper_analysis.check_cube_in_gripper(frame_num, action, prev_img, curr_img, done)
 #        self.box_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)

@@ -20,7 +20,7 @@ class CVAnalysisTools():
 
   ###############################################
   # should remove from automated func
-  def optflow(self, old_frame_path, new_frame_path):
+  def optflow(self, old_frame_path, new_frame_path, add_edges=False):
       if old_frame_path is None:
         print("optflow: old_frame None")
         return True
@@ -36,8 +36,6 @@ class CVAnalysisTools():
       lk_params = dict( winSize  = (15,15),
                         maxLevel = 2,
                         criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
-      # Create some random colors
-      color = np.random.randint(0,255,(100,3))
       # Take first frame and find corners in it
       # ret, old_frame = cap.read()
       old_gray = cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY)
@@ -46,6 +44,9 @@ class CVAnalysisTools():
       mask = np.zeros_like(old_frame)
   
       frame_gray = cv2.cvtColor(new_frame, cv2.COLOR_BGR2GRAY)
+      if add_edges:
+        old_gray = cv2.Canny(old_gray, 50, 200, None, 3)
+        frame_gray = cv2.Canny(frame_gray, 50, 200, None, 3)
       # calculate optical flow
       try:
         p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
@@ -58,6 +59,7 @@ class CVAnalysisTools():
       # draw the tracks
       dist = 0
       numpts = 0
+      # color = np.random.randint(0,255,(100,3))
       frame1 = new_frame
       for i,(new,old) in enumerate(zip(good_new,good_old)):
           a,b = new.ravel()
@@ -143,9 +145,12 @@ class CVAnalysisTools():
       cv2.waitKey(0)
       return self.foreground
 
-  def moved_pixels(self, prev_img_path, curr_img_path, init=False):
+  def moved_pixels(self, prev_img_path, curr_img_path, init=False, add_edges=False):
       prev_img = cv2.imread(prev_img_path)
       curr_img = cv2.imread(curr_img_path)
+      if add_edges:
+        prev_img = cv2.Canny(prev_img, 50, 200, None, 3)
+        curr_img = cv2.Canny(curr_img, 50, 200, None, 3)
       # thresh = 10
       thresh = 20
       prev_img = cv2.GaussianBlur(prev_img, (5, 5), 0)
@@ -216,12 +221,34 @@ class CVAnalysisTools():
 
   ###############################################
   def get_lines(self, img):
+      # Canny: Necessary parameters are:
+      #   image: Source/Input image of n-dimensional array.
+      #   threshold1: It is the High threshold value of intensity gradient.
+      #   threshold2: It is the Low threshold value of intensity gradient.
+      # Canny: Optional parameters are:
+      #   apertureSize: Order of Kernel(matrix) for the Sobel filter. 
+      #      Its default value is (3 x 3), and its value should be odd between 3 and 7. 
+      #      It is used for finding image gradients. Filter is used for smoothening and 
+      #      sharpening of an image.
+      #   L2gradient: This specifies the equation for finding gradient magnitude. 
+      #      L2gradient is of boolean type, and its default value is False.
       # edges = cv2.Canny(img, 75, 200, None, 3)
+      # edges = cv2.Canny(img, 50, 200, None, 3)
       edges = cv2.Canny(img, 50, 200, None, 3)
       # edges = cv2.Canny(img,100,200)
       # Copy edges to the images that will display the results in BGR
       imglinesp = np.copy(img)
-      # linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 10, 10)
+      # HoughLinesP Parameters:
+      #   image: 8-bit, single-channel binary source image. 
+      #   lines:Output vector of lines.
+      #   rho: Distance resolution of the accumulator in pixels.
+      #   theta: Angle resolution of the accumulator in radians.
+      #   threshold: Accumulator threshold parameter. Only those lines are returned that get 
+      #       enough votes ( >threshold ).
+      #   minLineLength: Minimum line length. Line segments shorter than that are rejected.
+      #   maxLineGap: Maximum allowed gap between points on the same line to link them.
+      #
+      #   linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 10, 10)
       linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 20, 20)
       if linesP is not None:
           print("num linesP:", len(linesP))
