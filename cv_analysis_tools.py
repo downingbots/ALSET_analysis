@@ -4,12 +4,14 @@ import math
 from config import *
 from matplotlib import pyplot as plt
 from skimage.feature import local_binary_pattern
+from shapely.geometry import *
 
 class CVAnalysisTools():
   def __init__(self):
       # foreground/background for movement detection
       self.background = None
       self.foreground = None
+      self.INFINITE = 1000000000000000000
       self.prev_foreground = None
       self.cfg = Config()
       # store the number of points and radius for color histogram
@@ -259,6 +261,81 @@ class CVAnalysisTools():
       # cv2.waitKey(0)
       return linesP, imglinesp
 
+  def get_min_max_borders(self, border):
+      b = []
+      for bdr in border:
+        b.append(list(bdr[0]))
+      poly = Polygon(b)
+      minx, miny, maxx, maxy = poly.bounds
+      return int(maxx), int(minx), int(maxy), int(miny)
+
+  def border_to_polygon(self, border, bufzone=0):
+      b = []
+      for bdr in border:
+        b.append(list(bdr[0]))
+      # print("brdr to poly:", b, bufzone)
+      poly = Polygon(b)
+      if bufzone > 0:
+        b2 = []
+        center = [poly.centroid.x,poly.centroid.y]
+        for bpt in b:
+          b2pt = bpt
+          for i in range(2):
+            if center[i] < bpt[i]-bufzone and center[i] < bpt[i]:
+              b2pt[i] = bpt[i]-bufzone
+            elif center[i] > bpt[i]+bufzone and center[i] > bpt[i]:
+              b2pt[i] = bpt[i]+bufzone
+            else:
+              b2pt[i] = bpt[i]
+          b2.append(b2pt)
+        poly = Polygon(b2)
+        # print("len b2, center", len(b2), center)
+      return poly
+
+  def point_in_border(self,pt,border):
+      bufzone = 10
+      # Create Point objects
+      poly = self.border_to_polygon(border, bufzone)
+      Pt = Point(pt)
+      if Pt.within(poly):
+        # print("pt within", Pt)
+        return True
+      else:
+        # print("pt not within", Pt)
+        return False
+
+  def line_in_border(self,border,pt0,pt1):
+      bufzone = 10
+      poly = self.border_to_polygon(border, bufzone)
+      line_a = LineString([pt0,pt1])
+      # print("line_in_border:", line_a.centroid, border)
+      if line_a.centroid.within(poly):
+        return True
+      else:
+        return False
+
+  def find_longest_line(self, linesP, border=None):
+      max_dist = 0
+      map_line = None
+      map_dx = None
+      map_dy = None
+      map_slope = None
+      in_brdr_cnt = 0
+      for [[l0,l1,l2,l3]] in linesP:
+          if border is None or self.line_in_border(border, (l0,l1), (l2,l3)):
+            # print("in border:", l0,l1,l2,l3)
+            in_brdr_cnt += 1
+            dx = l0 - l2
+            dy = l1 - l3
+            dist = np.sqrt(dx**2 + dy**2)
+            if max_dist < dist:
+              map_line = [l0,l1,l2,l3]
+              map_dx = dx
+              map_dy = dy
+              map_slope = np.arctan2(map_dx, map_dy)
+              max_dist = dist
+      return max_dist, map_line, map_dx, map_dy, map_slope, in_brdr_cnt
+
   def get_border_lines(self, img):
       # the following is not what we're looking for mapping, but may serve 
       # as a prototype for now. The following cuts away more than the borders
@@ -304,3 +381,23 @@ class CVAnalysisTools():
       (x, y, w, h) = cv2.boundingRect(c)
       return (x, y, w, h) 
 
+  
+  def color_quantification(self, img, num_clusters):
+      # try color quantification
+      Z = img.reshape((-1,3))
+      # convert to np.float32
+      Z = np.float32(Z)
+      # define criteria, number of clusters(K) and apply kmeans()
+      criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+      K = num_clusters
+      # compactness : sum of squared distance from each point to their centers.
+      # labels : the label array where each element marked '0', '1'.....
+      # centers : This is array of centers of clusters.
+      ret,label,center=cv2.kmeans(Z,K,None,criteria,10,cv2.KMEANS_RANDOM_CENTERS)
+      # Now convert back into uint8, and make original image
+      print("compactness, centers:", ret, center)
+      # ret is a single float, label is ?, center is RGB
+      center = np.uint8(center)
+      res = center[label.flatten()]
+      res2 = res.reshape((img.shape))
+      return res2

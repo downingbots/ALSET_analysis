@@ -4,6 +4,7 @@ import cv2 as cv
 import numpy as np 
 import math
 from shapely.geometry import *
+from cv_analysis_tools import *
 
 class Keypoints:
     ######################################
@@ -16,6 +17,7 @@ class Keypoints:
       self.kp_pc_points = None
       self.kp_mode = kp_mode
       self.img = img.copy()
+      self.cvu = CVAnalysisTools()
       if kp_mode == "SIFT":
         self.KP = cv.SIFT_create()
         self.img= cv.cvtColor(self.img,cv.COLOR_BGR2GRAY)
@@ -74,31 +76,20 @@ class Keypoints:
       return good, notsogood
 
     def point_in_border(self,border,pt):
-       b = []
-       for bdr in border:
-         b.append(list(bdr[0]))
-       if len(b) == 4:
-          bufzone = 10
-          if (b[0][0]+bufzone <= pt[0] and b[0][1]+bufzone <= pt[1] and
-             b[1][0]+bufzone <= pt[0] and b[1][1]-bufzone >= pt[1] and
-             b[2][0]-bufzone >= pt[0] and b[2][1]-bufzone >= pt[1] and
-             b[3][0]+bufzone >= pt[0] and b[3][1]+bufzone <= pt[1]):
-             return True
-          else:
-             return False
-       elif len(b) > 4:
+        b = []
+        for bdr in border:
+          b.append(list(bdr[0]))
         # Create Point objects
-        poly = self.border_to_polygon(border)
-        Pt = shapely.geometry.Point(pt[0],pt[1])
+        poly = self.cvu.border_to_polygon(border)
+        # Pt = shapely.geometry.Point(pt[0],pt[1])
+        Pt = Point(pt[0],pt[1])
         if Pt.within(poly):
-          print("Line within Poly")
+          print("Point within Poly")
           return True
         else:
           print("Point not within Poly")
           if Pt.touches(poly):
             print("Line touches Poly")
-          return False
-       else:
           return False
 
     def get_n_match_kps(self, matches, KP2, n, return_list=True, border=None):
