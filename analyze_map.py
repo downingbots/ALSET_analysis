@@ -19,9 +19,9 @@ from operator import itemgetter, attrgetter
 # https://www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
 class AnalyzeMap():
     def __init__(self):
-        self.stop_at_frame = 112
+        # self.stop_at_frame = 114
         self.curr_frame_num = 0
-        # self.stop_at_frame = 117
+        self.stop_at_frame = 117
         self.KPs = None
         self.map = None
         # real map array info
@@ -37,7 +37,7 @@ class AnalyzeMap():
         self.border_multiplier = 2   # move_img
         # To compute the distances,var of moves
         self.curr_move_height = None
-        self.curr_move_rows = None
+        self.curr_move_width = None
         self.curr_move = None
         self.curr_move_KP = None
         self.prev_move = None
@@ -69,6 +69,7 @@ class AnalyzeMap():
         self.dif_var = []
         self.min_pt = []
         self.max_pt = []
+        self.frame_num = 0
         self.color_quant_num_clust = 0
         self.INFINITE = 1000000000000000000
         self.cvu = CVAnalysisTools()
@@ -253,15 +254,23 @@ class AnalyzeMap():
         good_matches,notsogood = map_KP.compare_kp(new_map_rot_KP)
         print("kp_offsets: len good matches:", len(good_matches))
         map_pts, new_map_rot_pts = map_KP.get_n_match_kps(good_matches, new_map_rot_KP, 6, return_list=False, border=map_border)
+        for pnt in new_map_rot_pts:
+          pt = [int(pnt.pt[0]), int(pnt.pt[1])] # circle does [w,h], but KP also does [w,h]
+          new_map = cv2.circle(new_map_rot,pt,3,(255,0,0),-1)
         delta_h, delta_w = 0,0
         x,y = 0,1
         for i, map_pt in enumerate(map_pts):
-          delta_h += (map_pt.pt[x] - new_map_rot_pts[i].pt[x])
-          delta_w += (map_pt.pt[y] - new_map_rot_pts[i].pt[y])
+          # convert KP xy to image hw
+          delta_h += (map_pt.pt[y] - new_map_rot_pts[i].pt[y])
+          delta_w += (map_pt.pt[x] - new_map_rot_pts[i].pt[x])
+          print("kp_off: ", i, int(delta_h/(i+1)), int(delta_w/(i+1)))
         if len(map_pts) > 0:
           delta_h = int(delta_h / len(map_pts))
           delta_w = int(delta_w / len(map_pts))
-        print("kp_offsets hw: ", delta_h, delta_w) 
+        print("avg kp_offsets hw: ", delta_h, delta_w) 
+        if self.frame_num >= self.stop_at_frame:
+          cv2.imshow("Matching KeyPoints", new_map_rot)
+          cv2.waitKey(0)
         return delta_h, delta_w, map_pts, new_map_rot_pts
 
     ##############
@@ -285,7 +294,8 @@ class AnalyzeMap():
             best_kp_angle, best_kp_delta_h, best_kp_delta_w = angle, delta_h, delta_w 
             best_map_pts, best_new_map_pts = map_pts, new_map_rot_pts
             print("new best kp angle:",best_map_pts,best_new_map_pts)
-        if abs(max_angle - min_angle) <= .05 or delta_h == 0:
+        # we're now in radians, so need much smaller threshold
+        if abs(max_angle - min_angle) <= .001 or delta_h == 0:
           break
         elif delta_h > 0:
           min_angle = angle
@@ -294,14 +304,15 @@ class AnalyzeMap():
       return best_kp_angle, best_kp_delta_h, best_kp_delta_w, best_map_pts, best_new_map_pts
 
     def show_rot(self, new_map):
-      pt = [int(self.robot_location[1]), int(self.robot_location[0])]
+      pt = [int(self.robot_location[1]), int(self.robot_location[0])] # circle uses [w,h]
       new_map = cv2.circle(new_map,pt,3,(255,0,0),-1)
       pt = [int(new_map.shape[1]/2), int(new_map.shape[0]/2)]
       new_map = cv2.circle(new_map,pt,3,(255,0,0),-1)
       for angle in range(0,28,7):
         new_map_rot = self.rotate_about_robot(new_map, angle)
-        cv2.imshow(str(angle), new_map_rot)
-        cv2.waitKey(0)
+        if self.frame_num >= self.stop_at_frame:
+          cv2.imshow(str(angle), new_map_rot)
+          cv2.waitKey(0)
 
     #########################
     # Contours
@@ -335,8 +346,8 @@ class AnalyzeMap():
     #########################
     def add_border(self, img, bordersize):
         print("bordersize:", bordersize, img.shape[:2])
-        row, col = img.shape[:2]
-        bottom = img[row-2:row, 0:col]
+        height, width = img.shape[:2]
+        bottom = img[height-2:width, 0:width]
         mean = cv2.mean(bottom)[0]
         border = cv2.copyMakeBorder(
             img,
@@ -350,20 +361,30 @@ class AnalyzeMap():
         )
         return border
 
-    def replace_border(self, img, desired_rows, desired_cols, offset_rows, offset_cols):
+    def replace_border(self, img, desired_height, desired_width, offset_height, offset_width):
         shape, border = self.real_map_border(img)
-        maxh, minh, maxw, minw = self.cvu.get_min_max_borders(border)
-        orig_row, orig_col = img.shape[:2]
-        print("shapes:", orig_row,orig_col,minh,maxh,minw,maxw)
-        extract_img_rect = img[minw:maxw, minh:maxh]
-        extracted_rows, extracted_cols = extract_img_rect.shape[:2]
-        border_top = int((desired_rows - extracted_rows)/2) + offset_rows 
-        border_bottom = desired_rows - border_top - extracted_rows
-        border_left = int((desired_cols - extracted_cols)/2) + offset_cols 
-        border_right = desired_cols - border_left - extracted_cols 
-        print("replace_border:",border_top, border_bottom, border_left, border_right, offset_rows, offset_cols)
+        maxw, minw, maxh, minh = self.cvu.get_min_max_borders(border)
+        # maxh, minh, maxw, minw = self.cvu.get_min_max_borders(border)
+        print("maxh, minh, maxw, minw :", maxh, minh, maxw, minw, desired_height, desired_width, offset_height, offset_width)
+        extract_img_rect = img[minh:maxh, minw:maxw]
+        # extract_img_rect = img[minw:maxw, minh:maxh]
+        extract_height, extract_width = extract_img_rect.shape[:2]
+        insert_height = extract_height + 2*abs(offset_height)
+        insert_width  = extract_width + 2*abs(offset_width)
+        insert_img_rect = np.zeros((insert_height,insert_width,3),dtype="uint8")
+        for eh in range(extract_height):
+          for ew in range(extract_width):
+            new_w = ew + abs(offset_width) + offset_width
+            new_h = eh + abs(offset_height) + offset_height
+            insert_img_rect[new_h, new_w] = extract_img_rect[eh,ew]
+        border_top = int((desired_height - insert_height)/2)   
+        border_bottom = desired_height - border_top - insert_height
+        border_left = int((desired_width - insert_width)/2) 
+        border_right = desired_width - border_left - insert_width 
+        print("replace_border:",border_top, border_bottom, border_left, border_right, offset_height, offset_width)
+        # replace_border: -2355 -2355 674 675 3014 0
         bordered_img = cv2.copyMakeBorder(
-            extract_img_rect,
+            insert_img_rect,
             top=border_top,
             bottom=border_bottom,
             left=border_left,
@@ -373,9 +394,7 @@ class AnalyzeMap():
         )
         return bordered_img
 
-
     # angle = int(math.atan((y1-y2)/(x2-x1))*180/math.pi)
-
     # image is "new map" == the transformed "curr move" with border
     # center is about 4xfinger pads -> self.robot_location
     def rotate_about_robot(self, image, angle):
@@ -383,7 +402,7 @@ class AnalyzeMap():
         # Rotate the image using cv2.warpAffine()
         M = cv2.getRotationMatrix2D(self.robot_location, angle, 1)
         print("angle,M:", angle, M, self.robot_location, image.shape)
-        out = cv2.warpAffine(image, M, (image.shape[1], image.shape[0]))
+        out = cv2.warpAffine(image, M, (image.shape[0], image.shape[1]))
         # Display the results
         # cv2.imshow('rotate about robot', out)
         # cv2.waitKey(0)
@@ -463,7 +482,7 @@ class AnalyzeMap():
         print("longest line",map_line)
         if frame_num >= self.stop_at_frame:
           cv2.line(floor_clusters, (map_line[0], map_line[1]), (map_line[2], map_line[3]), (0,255,0), 3, cv2.LINE_AA)
-          pt = [int(self.robot_location[1]), int(self.robot_location[0])]
+          pt = [int(self.robot_location[1]), int(self.robot_location[0])] # circle uses [w,h]
           imglinesp = cv2.circle(floor_clusters,pt,3,(255,0,0),-1)
           # cv2.imshow("best map line", floor_clusters);
           # cv2.imshow("all map lines", imglinesp);
@@ -518,7 +537,7 @@ class AnalyzeMap():
               print("best line so far:", best_line, angle, diff_slope, "dxy:", map_slope, (dx/dy))
         print("in border line cnt: ", in_brdr_cnt)
         if frame_num >= self.stop_at_frame:
-          # pt = [int(self.robot_location[1]), int(self.robot_location[0])]
+          # pt = [int(self.robot_location[1]), int(self.robot_location[0])] # [w,h]
           # imglinesp = cv2.circle(imglinesp,pt,3,(255,0,0),-1)
           # cv2.imshow("rotated new map:",imglinesp)
           # cv2.waitKey(0)
@@ -527,7 +546,7 @@ class AnalyzeMap():
           # did we rotate too far?
           angle_max = angle
           break
-        elif min_slope_dif == 0 or abs(angle_max - angle_min) <= .05:
+        elif min_slope_dif == 0 or abs(angle_max - angle_min) <= .001:
           print("angle min max: ", angle_min, angle_max, min_slope_dif)
           # angle min max:  14.970703125 15 16.365384615384613
           # how is min_slope_dif bigger than max angle?
@@ -552,57 +571,6 @@ class AnalyzeMap():
         final_angle = min_slope_dif_angle
       return best_line, final_angle
     
-
-    # compare best Map Line to best "new map img" Line
-    # Two lines defined by: y = mx + b
-    # Function to find the vertical distance between parallel lines
-    # Adjust robot location to match
-    def adjustRobotLocationByLines(self, MapPt1, MapPt2, NewPt1, NewPt2):
-          x = 0
-          y = 1
-          # dx / dy
-          MapSlope = (MapPt1[x] - MapPt2[x]) / (MapPt1[y] - MapPt2[y])
-          NewSlope = (NewPt1[x] - NewPt2[x]) / (NewPt1[y] - NewPt2[y])
-          # b = y - Mx
-          MapB     = MapPt1[y] - MapSlope*MapPt1[x]
-          MapB2    = MapPt2[y] - MapSlope*MapPt2[x]
-          NewB     = NewPt1[y] - NewSlope*NewPt1[x]
-          NewB2    = NewPt2[y] - NewSlope*NewPt2[x]
-          print("MapB,B2; NewB,B2:", MapB, MapB2, NewB, NewB2, (MapB-NewB))
-          # x = (y - b)/M
-          MapXatRobot = (self.robot_location[y] - MapB) / MapSlope
-          NewXatRobot = (self.robot_location[y] - NewB) / NewSlope
-          NewXatRobot2= (self.robot_location[y] - MapB) / NewSlope
-          print("NewX, oldX:", NewXatRobot, NewXatRobot2)
-          # y = Mx + b
-          MapYatRobot = MapSlope * self.robot_location[x] + MapB
-          NewYatRobot = NewSlope * self.robot_location[x] + NewB
-          NewYatRobot2= NewSlope * self.robot_location[x] + MapB
-          # Note: same Robot Loc (x,y), diff angle
-          #
-          Ydif = NewYatRobot - NewYatRobot2  
-          # Ydif = MapYatRobot - NewYatRobot  
-          # self.robot_location[y] -= Ydif
-          # print("robot loc:", self.robot_location, Ydif, MapYatRobot, NewYatRobot, MapB, NewB)
-          # return Ydif
-          #
-          # Xdif = MapXatRobot - NewXatRobot  
-          Xdif = NewXatRobot2 - NewXatRobot
-          #          MapXatRobot = (self.robot_location[y] - MapB) / MapSlope
-          NewXatRobot = (self.robot_location[y] - NewB) / NewSlope
-          NewXatRobot2= (self.robot_location[y] - MapB) / NewSlope
-          print("NewX, oldX:", NewXatRobot, NewXatRobot2)
-          # y = Mx + b
-          MapYatRobot = MapSlope * self.robot_location[x] + MapB
-          NewYatRobot = NewSlope * self.robot_location[x] + NewB
-          NewYatRobot2= NewSlope * self.robot_location[x] + MapB
-          # self.robot_location[x] += Xdif
-          print("Xdif Ydiff: ", Xdif, Ydif)
-          # self.robot_location[y] = NewYatRobot2
-          # self.robot_location_history.append([self.robot_location, "Parallel Line adjustment"])
-          print("robot loc:", self.robot_location, Xdif, MapXatRobot, NewXatRobot, MapB, NewB)
-          return Xdif
-                 
     #########################
     # Hardcoding / Manually tuning / gathering data to figure out algorithm
     def manual_tuning(self, frame_num):
@@ -657,7 +625,7 @@ class AnalyzeMap():
         return off_h, off_w
     
 
-    def get_height_dif_by_line(self, rnm, map_line, map_slope):
+    def get_height_dif_by_line(self, rnm, map_line, map_slope, offset_width=None):
         floor_clusters = self.cvu.color_quantification(rnm, self.color_quant_num_clust)
         shape, new_map_rot_border = self.real_map_border(rnm)
         linesP, imglinesp = self.cvu.get_lines(rnm)
@@ -676,6 +644,9 @@ class AnalyzeMap():
               best_line = [l0,l1,l2,l3]
         if (map_line[3] - map_line[1]) == 0:
             map_b = self.INFINITE
+        elif offset_width is not None:
+            robot_w = offset_width
+            off_b = robot_w * (map_line[1]-map_line[3])/(map_line[0]-map_line[2]) - robot_w * (best_line[1]-best_line[3])/(best_line[0]-best_line[2])
         else:
             # For the robot w location, compute the h location
             # h1 = m1*w1 + b1   ; h2 = m2*w2 + b2
@@ -686,15 +657,31 @@ class AnalyzeMap():
             print("off_b", off_b)
         return round(off_b)
 
-    def feature_offsets(self, map_overlay, rotated_new_map, map_line, map_slope, rot_line, frame_num):
+    def feature_offsets(self, map_overlay, rotated_new_map, map_line, map_slope, rot_line, frame_num, use_slope=False, offset_width=None):
         print("###############")
         print("feature offsets")
-        off_h = None
-        off_w = None
+        moff_h, moff_w = self.manual_tuning(frame_num)
+
         map_pts = []
         rot_pts = []
+        off_h = 0
         mol = map_overlay.copy()
         rnm = rotated_new_map.copy()
+        # x = (y - b)/M
+        if use_slope:
+          off_h = self.get_height_dif_by_line(rnm, map_line, map_slope, offset_width)
+          if offset_width is not None:
+            off_w = offset_width
+          else:
+            off_w = 0
+          if off_h > 10*moff_h or off_w > 10*moff_w:
+            return off_h, off_w, [],[]
+          # off_h and off_w are absolute offsets for replace_border
+          # The KPs should be at same H as the new offset.
+          rnm = self.replace_border(rnm,
+                            self.map_overlay.shape[0], self.map_overlay.shape[1],
+                            off_h,off_w)
+
         shape, map_border = self.real_map_border(mol)
         shape, rot_border = self.real_map_border(rnm)
         gray_mol = cv2.cvtColor(mol, cv2.COLOR_BGR2GRAY)
@@ -749,13 +736,20 @@ class AnalyzeMap():
               continue
             if first_time_through:
               rnm=cv2.circle(rnm,rot_pt,3,(255,0,0),-1)
+            # distance needs to be directional, and consider both x,y separately
+            # change of slope and line segment (sounds like a keypoint!)
+            # min change of both varx & vary
+            # the diff_distance_variation needs to be in the same direction
             dist = math.sqrt((map_pt[0]-rot_pt[0])**2+(map_pt[1]-rot_pt[1])**2)
-            # with y=mx+b, we only need to rank y and compute x
-            ranking = map_pt[0]-rot_pt[0]
+            if (map_pt[0] > rot_pt[0]):
+              dist = -dist 
+            slope = np.arctan2((map_pt[0] - rot_pt[0]) , (map_pt[1]-rot_pt[1]))
+            ranking = slope * dist
             delta.append([ranking, i, j])
-        cv2.imshow("mol feature offset", mol)
-        cv2.imshow("rot feature offset", rnm)
-        cv2.waitKey(0)
+        if self.frame_num >= self.stop_at_frame:
+          cv2.imshow("mol feature offset", mol)
+          cv2.imshow("rot feature offset", rnm)
+          cv2.waitKey(0)
         min_var = self.INFINITE
         # for n in range(6,len(delta)):
         n = 20
@@ -790,22 +784,26 @@ class AnalyzeMap():
             rfeat = rot_features[rf][0]
             map_pts.append(map_features[mf])
             rot_pts.append(rot_features[rf])
-            # print("map_feat:", mfeat, rfeat)
+            print("map_feat:", mfeat, rfeat)
             # compute the mean difference
-            sum_h += mfeat[1] - rfeat[1]
-            sum_w += mfeat[0] - rfeat[0]
-          off_h = int(sum_h/n)
-          off_w = int(sum_w/n)
-
-          # x = (y - b)/M
-          off_b = self.get_height_dif_by_line(rnm, map_line, map_slope)
+            sum_h += mfeat[0] - rfeat[0]
+            sum_w += mfeat[1] - rfeat[1]
+          foff_h = -int(sum_h/n)
+          foff_w = -int(sum_w/n)
 
           moff_h, moff_w = self.manual_tuning(frame_num)
-          print("n off xy, manual xy", n, [off_h, off_w], [moff_h, moff_w], [off_b, off_w])
-          #     # n off xy, manual xy 20 None       -8   0      -45 61 1310.0262377400063
-          #     # n off xy, manual xy 20 None       5    3      -73 87 1242.2292568801622
+          if use_slope:
+            # off_h computed earlier
+            if offset_width is not None:
+              off_w += foff_w  
+            else:
+              off_w = foff_w  
+          else:
+            off_h = foff_h
+            off_w = foff_w
+          print("n off xy, manual xy", n, [foff_h, foff_w], [moff_h, moff_w], [off_h, off_w])
 
-        return off_b, off_w, map_pts, rot_pts
+        return off_h, off_w, map_pts, rot_pts
         # return moff_h, moff_w, map_pts, rot_pts
     
 
@@ -817,18 +815,18 @@ class AnalyzeMap():
     def feature_slope_offsets(self, map_overlay, rotated_new_map, map_line, map_slope, foff_h, foff_w, frame_num):
         off_h = foff_h
         off_w = foff_w
-        while True:
+        for max_number_of_iterations in range(15):
           rnm = rotated_new_map.copy()
           rnm = self.replace_border(rnm,
                             self.map_overlay.shape[0], self.map_overlay.shape[1],
                             off_h,off_w)
-# ARD: the recentering changes the calculations of B a lot...
           # the general idea is that the slope computes the height axis and
           # feature points control the width axis.
-          off_b = self.get_height_dif_by_line(rnm, map_line, map_slope)
+          off_b = self.get_height_dif_by_line(rnm, map_line, map_slope, off_w)
           off_h += off_b   # solves 112 slightly off with huge oscilations for unknown reasons
           print("off_b, off_h, off_w", off_b, off_h, off_w)
           # off_h and off_w are absolute offsets for replace_border 
+          # The KPs should be at same H as the new offset.
           rnm = rotated_new_map.copy()
           rnm = self.replace_border(rnm,
                             self.map_overlay.shape[0], self.map_overlay.shape[1],
@@ -876,8 +874,16 @@ class AnalyzeMap():
               if first_time_through:
                 rnm=cv2.circle(rnm,rot_pt,3,(255,0,0),-1)
                 rot_feature_cnt += 1
-              # dist = math.sqrt((map_pt[0]-rot_pt[0])**2+(map_pt[1]-rot_pt[1])**2)
-              dist = abs(map_pt[1]-rot_pt[1])
+              # off_h and off_w are absolute offsets for replace_border and ideally 
+              # the w distance will be 0.  
+              #
+              # Use full distance provides some penalty if for delta h, but needs to 
+              # be more than delta w. Cube the delta w.
+              #
+              # consistent direction helps too.
+              # Use the var approach from above?
+              dist = np.sqrt((map_pt[0]-rot_pt[0])**3+(map_pt[1]-rot_pt[1])**2)
+              # dist = abs(map_pt[1]-rot_pt[1])
               # print("dist:", dist, min_dist)
               if dist < min_dist:
                 min_dist = dist
@@ -903,7 +909,7 @@ class AnalyzeMap():
           print("Top N:", n,  len(best_match))
           # n = len(best_match)
           best_match = sorted(best_match,key=itemgetter(0))
-          print("best match:", best_match)
+          # print("best match:", best_match)
           for k, bm in enumerate(best_match):
             if k >= n:
               break
@@ -914,17 +920,15 @@ class AnalyzeMap():
             # rot_pt = [round(rot_features[bm[2]][0][1]), round(rot_features[bm[2]][0][0])]
             map_pt = [round(map_features[bm[1]][0][0]), round(map_features[bm[1]][0][1])]
             rot_pt = [round(rot_features[bm[2]][0][0]), round(rot_features[bm[2]][0][1])]
-            # print("bm: ",k, [round(bm[0]), map_pt, rot_pt])
+            print("bm: ",k, [round(bm[0]), map_pt, rot_pt])
             sum_dist += bm[0]
             sum_h_dif += map_pt[0] - rot_pt[0]
             sum_w_dif += map_pt[1] - rot_pt[1]
           if len(best_match) == 0:
             print("NO MATCHING FEATURES/SLOPE")
             return None, None, [], []
-          bm_off_h = round(sum_h_dif / n)
-          bm_off_w = round(sum_w_dif / n)
-          # bm_off_h = round(sum_h_dif / len(best_match))
-          # bm_off_w = round(sum_w_dif / len(best_match))
+          bm_off_h = -round(sum_h_dif / n)
+          bm_off_w = -round(sum_w_dif / n)
           #
           # the general idea is that the slope is computing one axis and
           # feature points control the other axis
@@ -932,21 +936,23 @@ class AnalyzeMap():
           # off_w is solved via equation for B above, so no need for following:
           # off_h += bm_off_h
           off_w += bm_off_w
-          if sum_dist/n <= 2 or (abs(bm_off_w) <= 1 and abs(off_b) <= 1):
+          if int(sum_dist/n) <= 2 or (abs(bm_off_w) <= 1 and abs(off_b) <= 1):
             print("FOUND MATCHING FEATURES_SLOPE:", frame_num, off_h, off_w, int(sum_dist/len(best_match)), off_b, bm_off_w)
             break
           else:
-            print("TRY FEATURES_SLOPE AGAIN:", frame_num, off_h, off_w, int(sum_dist/n), off_b, bm_off_w)
-            cv2.imshow("mol feature offset", mol)
-            cv2.imshow("rot feature offset", rnm)
-            cv2.waitKey(0)
+            print(max_number_of_iterations, "TRY FEATURES_SLOPE AGAIN:", frame_num, off_h, off_w, int(sum_dist/n), off_b, bm_off_w)
+            if self.frame_num >= self.stop_at_frame:
+              cv2.imshow("mol feature offset", mol)
+              cv2.imshow("rot feature offset", rnm)
+              cv2.waitKey(0)
           continue   # end of loop
         #### FOUND MATCHING FEATURES/SLOPE ####
         map_pts = []
         rot_pts = []
-        cv2.imshow("mol feature offset", mol)
-        cv2.imshow("rot feature offset", rnm)
-        cv2.waitKey(0)
+        if self.frame_num >= self.stop_at_frame:
+          cv2.imshow("mol feature offset", mol)
+          cv2.imshow("rot feature offset", rnm)
+          cv2.waitKey(0)
         for k, bm in enumerate(best_match):
           map_pts.append(map_features[bm[1]])
           rot_pts.append(rot_features[bm[2]])
@@ -959,27 +965,34 @@ class AnalyzeMap():
         map_shape, map_border = self.real_map_border(map)
         new_map_shape, new_map_border = self.real_map_border(new_map)
         # find overlap
-        map_maxh, map_minh, map_maxw, map_minw = self.cvu.get_min_max_borders(map_border)
-        new_map_maxh, new_map_minh, new_map_maxw, new_map_minw = self.cvu.get_min_max_borders(new_map_border)
+        # map_maxh, map_minh, map_maxw, map_minw = self.cvu.get_min_max_borders(map_border)
+        # new_map_maxh, new_map_minh, new_map_maxw, new_map_minw = self.cvu.get_min_max_borders(new_map_border)
+        map_maxw, map_minw, map_maxh, map_minh = self.cvu.get_min_max_borders(map_border)
+        new_map_maxw, new_map_minw, new_map_maxh, new_map_minh = self.cvu.get_min_max_borders(new_map_border)
         print("new_map/map minw:", new_map_minw, map_minw)
+        print("new_map/map maxw:", new_map_maxw, map_maxw)
+        print("new_map/map minh:", new_map_minw, map_minw)
+        print("new_map/map maxh:", new_map_maxw, map_maxw)
+        print("new_map/map shape:", new_map.shape, map.shape)
         final_map = map.copy()
         buffer = 3  # eliminate the black border at the merge points
-        for h in range(new_map_minh, new_map_maxh):
-          for w in range(new_map_minw, new_map_maxw):
+        for h in range(new_map_minh-1, new_map_maxh):
+          for w in range(new_map_minw-1, new_map_maxw):
             if final_map[h,w].all() == 0:
               final_map[h,w] = new_map[h,w]
             elif new_map[h,w].all() == 0:
-              pass
-            elif (new_map[h-buffer,w].all() == 0 or
-                  new_map[h+buffer,w].all() == 0 or
-                  new_map[h, w+buffer].all() == 0 or
-                  new_map[h, w-buffer].all() == 0):
               pass
             elif (final_map[h-buffer,w].all() == 0 or
                   final_map[h+buffer,w].all() == 0 or
                   final_map[h, w+buffer].all() == 0 or
                   final_map[h, w-buffer].all() == 0):
               final_map[h,w] = new_map[h,w]
+            elif (new_map[h-buffer,w].all() == 0 or
+                  new_map[h+buffer,w].all() == 0 or
+                  new_map[h, w+buffer].all() == 0 or
+                  new_map[h, w-buffer].all() == 0):
+              # avoid adding border around new_map
+              pass
             else:
               final_map[h,w] = .5*final_map[h,w] + .5*new_map[h,w]
         return final_map
@@ -989,6 +1002,7 @@ class AnalyzeMap():
     #################################
 
     def analyze(self, frame_num, action, prev_img_pth, curr_img_pth, done):
+        self.frame_num = frame_num
         curr_image = cv2.imread(curr_img_pth)
         curr_image_KP = Keypoints(curr_image)
         self.curr_move = self.get_birds_eye_view(curr_image)
@@ -1016,7 +1030,7 @@ class AnalyzeMap():
           self.robot_length = 200
           self.robot_location = [(self.border_buffer+self.robot_length + self.curr_move_height), (self.border_buffer + self.curr_move_width/2)]
           # self.robot_location = [(self.border_buffer + self.curr_move_height/2),(self.border_buffer+self.robot_length + self.curr_move_height)]
-          print("self.robot_location:",self.map_height, self.map_width, self.border_buffer, self.robot_length)
+          print("robot_location:",self.robot_location, self.map_height, self.map_width, self.border_buffer, self.robot_length)
 
           self.robot_location_history.append([self.robot_location, "Initial Guess"])
           self.VIRTUAL_MAP_SIZE = self.border_buffer * 1 + self.map_height
@@ -1033,7 +1047,7 @@ class AnalyzeMap():
         ###########################
         else:
           # initialize images and map for new move
-          rows,cols,ch = self.curr_move.shape
+          height,width,ch = self.curr_move.shape
           # cv2.imshow("curr_move:", self.curr_move)
           new_map = self.add_border(self.curr_move, self.border_buffer)
           # cv2.imshow("orig new_map:", new_map)
@@ -1071,18 +1085,6 @@ class AnalyzeMap():
               final_angle = best_line_angle
               print("Final best angle:", final_angle)
               self.robot_orientation = final_angle
-              # compare best Map Line to best "new map img" Line
-              # Two lines defined by: y = mx + b
-              # Function to find the vertical distance between parallel lines
-              # Adjust robot location to match
-              # rotated_new_map = new_map.copy()  # for resilience against bugs
-              # rotated_new_map = self.rotate_about_robot(rotated_new_map, final_angle)
-              # cv2.line(rotated_new_map, (best_line[0], best_line[1]), (best_line[2], best_line[3]), (0,255,0), 3, cv2.LINE_AA)
-              # cv2.imshow("Before adjust, rotated around robot", rotated_new_map)
-              # Xdif = self.adjustRobotLocationByLines((map_line[0], map_line[1]), 
-              #           (map_line[2], map_line[3]), (best_line[0], best_line[1]), 
-              #           (best_line[2], best_line[3]))
-              # print("final line angle, Xdif:", final_angle, Xdif)
 
               rotated_new_map = new_map.copy()  # for resilience against bugs
               rotated_new_map = self.rotate_about_robot(rotated_new_map, final_angle)
@@ -1106,12 +1108,14 @@ class AnalyzeMap():
               rotated_new_map = self.rotate_about_robot(rotated_new_map, best_kp_angle)
               if frame_num >= self.stop_at_frame:
                   rotated_new_map_disp = rotated_new_map_KP.drawKeypoints()
-                  cv2.imshow("map kp", rotated_new_map_disp)
+                  if self.frame_num >= self.stop_at_frame:
+                    cv2.imshow("map kp", rotated_new_map_disp)
                   rotated_new_map_disp = rotated_new_map.copy()
                   rotated_new_map_disp_KP = Keypoints(rotated_new_map_disp)
                   rotated_new_map_disp = rotated_new_map_disp_KP.drawKeypoints()
-                  cv2.imshow("best kp, rotated", rotated_new_map_disp)
-                  cv2.waitKey(0)
+                  if self.frame_num >= self.stop_at_frame:
+                    cv2.imshow("best kp, rotated", rotated_new_map_disp)
+                    cv2.waitKey(0)
 
             ##############
             # Best Rotated Image found via line or KP analysis
@@ -1131,14 +1135,14 @@ class AnalyzeMap():
                 kp_off_h, kp_off_w, map_pts, new_map_rot_pts = self.evaluate_map_kp_offsets(mol_kp, rnm)
                 rnm = rnm_kp.drawKeypoints()
                 mol = mol_kp.drawKeypoints()
-                #if frame_num >= self.stop_at_frame:
-                #  cv2.imshow("rotate_new_mapkp", rnm)
-                #  cv2.imshow("mol kp", mol)
-                #  cv.waitKey(0)
-                #  cv2.destroyAllWindows()
+                if frame_num >= self.stop_at_frame:
+                  cv2.imshow("rotate_new_mapkp", rnm)
+                  cv2.imshow("mol kp", mol)
+                  cv.waitKey(0)
+                  cv2.destroyAllWindows()
                 if len(map_pts) > 0:
                   break
-              print("KP match: ",(kp_off_h, kp_off_w))
+              print("RESULT: KP match: ",(kp_off_h, kp_off_w))
 
               # If kp_mode didn't work, try more generic features, combined with line slope
               foff_h = 0 
@@ -1149,17 +1153,23 @@ class AnalyzeMap():
                 # if len(map_pts) == 0:
                 if True:
                   foff_h, foff_w, map_pts, new_map_rot_pts = self.feature_offsets(self.map_overlay, rotated_new_map, map_line, map_slope, best_line, frame_num)
-                  print("features: ",(foff_h, foff_w),(moff_h, moff_w))
+                  print("RESULT: Purely based on features: ",(foff_h, foff_w),(moff_h, moff_w))
+                  foff_h, foff_w, map_pts, new_map_rot_pts = self.feature_offsets(self.map_overlay, rotated_new_map, map_line, map_slope, best_line, frame_num, use_slope=True)
+                  print("RESULT: slope/var features: ",(foff_h, foff_w),(moff_h, moff_w))
+                  foff_h, foff_w, map_pts, new_map_rot_pts = self.feature_offsets(self.map_overlay, rotated_new_map, map_line, map_slope, best_line, frame_num, use_slope=True, offset_width=foff_w)
+                  print("RESULT: slope/var features w offset_width: ",(foff_h, foff_w),(moff_h, moff_w))
                 else:
                   foff_h = kp_off_h
                   foff_w = kp_off_w
-                  print("KP match: ",(foff_h, foff_w),(moff_h, moff_w))
+                  print("RESULT: KP match: ",(foff_h, foff_w),(moff_h, moff_w))
 
                 # compute from scratch; ignore above variance/manual/keypoint calculations.
                 foff_h, foff_w = 0, 0
                 off_h, off_w, map_pts, new_map_rot_pts = self.feature_slope_offsets(self.map_overlay, rotated_new_map, map_line, map_slope, foff_h, foff_w, frame_num)
+                print("RESULT: feature_slope: ",(off_h, off_w),(moff_h, moff_w))
 
-              if len(map_pts) == 0:
+              # if len(map_pts) == 0:
+              if True:
                 print("KEYPOINT, FEATURE AND LINE TUNING FAILED, FALLBACK TO MANUAL TUNING", frame_num)
                 off_h,off_w = self.manual_tuning(frame_num)
                 print("off_h, off_w:", off_h, off_w)
@@ -1171,6 +1181,7 @@ class AnalyzeMap():
                                   self.map_overlay.shape[0], self.map_overlay.shape[1],
                                   off_h,off_w)
                 rotated_new_map_disp = rotated_new_map.copy() # display rotation
+                # circle accepts [w,h]
                 pt = [int(self.robot_location[1]), int(self.robot_location[0])]
                 rotated_new_map_disp=cv2.circle(rotated_new_map_disp,pt,3,(255,0,0),-1)
                 txt = "rot reborder h:" + str(off_h) + " w:" + str(off_w)
@@ -1187,32 +1198,5 @@ class AnalyzeMap():
                 # cv2.imshow("rotated around robot", rotated_new_map)
                 cv2.waitKey(0)
                 cv2.destroyAllWindows()
-
-          #####################################################################
-          # MAP STICHING APPROACH BASED UPON KEYPOINTS
-          # Problem when no matching keypoints!
-          #####################################################################
-          if False:
-            # Stitching - based on keypoints
-            # OpenCV stitching came up with something asthetically pleasing, but
-            # not accurate. 
-            ###################
-            # map_border = self.real_map_border(self.map)
-            # new_map_border = self.real_map_border(new_map)
-            s = Img_Stitch(self.map, new_map)
-            s.leftshift()
-            s.showImage('left')
-            s.rightshift()
-            self.map = s.leftImage
-            # Img_stitch: the rotation of the curr_move to map eventually fails
-            # s2 = Img_Stitch(self.map, new_map2)
-            # s2.leftshift()
-            # s2.showImage('left2')
-            # s2.rightshift()
-            # self.map = s2.leftImage
-            self.map = s.leftImage
-            self.map_height,self.map_width,self.map_ch = self.map.shape
-            self.map_KP = Keypoints(self.map)
-            self.map_arr = asarray(self.map)
-
           return
+

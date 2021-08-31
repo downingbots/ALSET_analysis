@@ -266,8 +266,11 @@ class CVAnalysisTools():
       for bdr in border:
         b.append(list(bdr[0]))
       poly = Polygon(b)
-      minx, miny, maxx, maxy = poly.bounds
-      return int(maxx), int(minx), int(maxy), int(miny)
+      minw, minh, maxw, maxh = poly.bounds
+      return int(maxw), int(minw), int(maxh), int(minh)
+      # minh, minw, maxh, maxw = poly.bounds
+      # minx, miny, maxx, maxy
+      # return int(maxh), int(minh), int(maxw), int(minw)
 
   def border_to_polygon(self, border, bufzone=0):
       b = []
@@ -327,7 +330,7 @@ class CVAnalysisTools():
             in_brdr_cnt += 1
             dx = l0 - l2
             dy = l1 - l3
-            dist = np.sqrt(dx**2 + dy**2)
+            dist = np.sqrt(dx**1 + dy**2)
             if max_dist < dist:
               map_line = [l0,l1,l2,l3]
               map_dx = dx

@@ -80,11 +80,11 @@ class Keypoints:
         for bdr in border:
           b.append(list(bdr[0]))
         # Create Point objects
-        poly = self.cvu.border_to_polygon(border)
-        # Pt = shapely.geometry.Point(pt[0],pt[1])
+        bufzone = 10
+        poly = self.cvu.border_to_polygon(border, bufzone)
         Pt = Point(pt[0],pt[1])
         if Pt.within(poly):
-          print("Point within Poly")
+          print("Point within Poly", Pt)
           return True
         else:
           print("Point not within Poly")
