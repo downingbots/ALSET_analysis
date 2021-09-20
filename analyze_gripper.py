@@ -18,6 +18,17 @@ class AnalyzeGripper():
       self.add_edges = False   # didn't seem to add much, if anything
       self.cvu = CVAnalysisTools()
 
+  def detect_robot_body(self, image_path):
+      # store non-gripper image fragments of the robot body
+      # todo
+      pass
+
+  def detect_grabbed_object(self, image_path):
+      # register non-gripper image fragments of the grabbed object
+      # with other classes that collect images of interest.
+      # todo
+      pass
+
   # bound the images based upon movement
   # then get gripper contours from the area of movement
   def gripper_edges(self, image_path):

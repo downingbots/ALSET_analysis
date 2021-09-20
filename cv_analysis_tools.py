@@ -1,10 +1,13 @@
 import numpy as np
 import cv2
 import math
+import imutils
 from config import *
 from matplotlib import pyplot as plt
 from skimage.feature import local_binary_pattern
 from shapely.geometry import *
+from pprint import pprint
+from utilborders import *
 
 class CVAnalysisTools():
   def __init__(self):
@@ -12,6 +15,7 @@ class CVAnalysisTools():
       self.background = None
       self.foreground = None
       self.INFINITE = 1000000000000000000
+      self.BLACK = [0,0,0]
       self.prev_foreground = None
       self.cfg = Config()
       # store the number of points and radius for color histogram
@@ -28,8 +32,14 @@ class CVAnalysisTools():
         return True
       old_frame = cv2.imread(old_frame_path)
       new_frame = cv2.imread(new_frame_path)
+      opt_flow_results = self.optflow_pts(old_frame, new_frame, add_edges)
+      return opt_flow_results["result"]
+
+  def optflow_pts(self, old_frame, new_frame, add_edges=False):
       # cap = cv2.VideoCapture('slow.flv')
       # params for ShiTomasi corner detection
+      optflow_results = {}
+
       feature_params = dict( maxCorners = 100,
                              qualityLevel = 0.3,
                              minDistance = 7,
@@ -54,6 +64,9 @@ class CVAnalysisTools():
         p1, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
       except:
         print("OPT FLOW FAILS")
+        optflow_results["result"] = False
+        optflow_results["prevpts"] = None
+        optflow_results["currpts"] = None
         return False
       # Select good points
       good_new = p1[st==1]
@@ -63,13 +76,19 @@ class CVAnalysisTools():
       numpts = 0
       # color = np.random.randint(0,255,(100,3))
       frame1 = new_frame
+      gn_pts = []
+      go_pts = []
       for i,(new,old) in enumerate(zip(good_new,good_old)):
           a,b = new.ravel()
           c,d = old.ravel()
+          gn_pts.append([int(a), int(b)])
+          go_pts.append([int(c), int(d)])
           dist += math.hypot(a-c,b-d)
           numpts += 1
           # mask = cv2.line(mask, (a,b),(c,d), color[i].tolist(), 2)
           # frame1 = cv2.circle(frame1,(a,b),5,color[i].tolist(),-1)
+      gn_pts = np.array(gn_pts)
+      go_pts = np.array(go_pts)
       img = cv2.add(new_frame,mask)
       # cv2.imshow('frame',img)
       # k = cv2.waitKey(30) & 0xff
@@ -86,9 +105,14 @@ class CVAnalysisTools():
       # tried 0.75, 0.9, 1
       # OPTFLOWTHRESH = 0.8
       if dist > self.cfg.OPTFLOWTHRESH:
-        return True
+        optflow_results["result"] = True
+        optflow_results["prevpts"] = go_pts
+        optflow_results["currpts"] = gn_pts
       else:
-        return False
+        optflow_results["result"] = False
+        optflow_results["prevpts"] = go_pts
+        optflow_results["currpts"] = gn_pts
+      return optflow_results
 
   # ARD: does not work well
   def moved_pixels_over_time(self, prev_img_path, curr_img_path, init=False):
@@ -212,6 +236,7 @@ class CVAnalysisTools():
           ref_hist, _ = np.histogram(self.textures[label], density=True, bins=n_bins,
                                      range=(0, n_bins))
           score = kullback_leibler_divergence(hist, ref_hist)
+          # lower score is better
           if score < best_score:
               best_score = score
               best_name = label
@@ -261,62 +286,6 @@ class CVAnalysisTools():
       # cv2.waitKey(0)
       return linesP, imglinesp
 
-  def get_min_max_borders(self, border):
-      b = []
-      for bdr in border:
-        b.append(list(bdr[0]))
-      poly = Polygon(b)
-      minw, minh, maxw, maxh = poly.bounds
-      return int(maxw), int(minw), int(maxh), int(minh)
-      # minh, minw, maxh, maxw = poly.bounds
-      # minx, miny, maxx, maxy
-      # return int(maxh), int(minh), int(maxw), int(minw)
-
-  def border_to_polygon(self, border, bufzone=0):
-      b = []
-      for bdr in border:
-        b.append(list(bdr[0]))
-      # print("brdr to poly:", b, bufzone)
-      poly = Polygon(b)
-      if bufzone > 0:
-        b2 = []
-        center = [poly.centroid.x,poly.centroid.y]
-        for bpt in b:
-          b2pt = bpt
-          for i in range(2):
-            if center[i] < bpt[i]-bufzone and center[i] < bpt[i]:
-              b2pt[i] = bpt[i]-bufzone
-            elif center[i] > bpt[i]+bufzone and center[i] > bpt[i]:
-              b2pt[i] = bpt[i]+bufzone
-            else:
-              b2pt[i] = bpt[i]
-          b2.append(b2pt)
-        poly = Polygon(b2)
-        # print("len b2, center", len(b2), center)
-      return poly
-
-  def point_in_border(self,pt,border):
-      bufzone = 10
-      # Create Point objects
-      poly = self.border_to_polygon(border, bufzone)
-      Pt = Point(pt)
-      if Pt.within(poly):
-        # print("pt within", Pt)
-        return True
-      else:
-        # print("pt not within", Pt)
-        return False
-
-  def line_in_border(self,border,pt0,pt1):
-      bufzone = 10
-      poly = self.border_to_polygon(border, bufzone)
-      line_a = LineString([pt0,pt1])
-      # print("line_in_border:", line_a.centroid, border)
-      if line_a.centroid.within(poly):
-        return True
-      else:
-        return False
-
   def find_longest_line(self, linesP, border=None):
       max_dist = 0
       map_line = None
@@ -336,10 +305,12 @@ class CVAnalysisTools():
               map_dx = dx
               map_dy = dy
               map_slope = np.arctan2(map_dx, map_dy)
+              if map_slope < 0:   # keep all slopes positive
+                map_slope = 2 * np.pi + map_slope
               max_dist = dist
       return max_dist, map_line, map_dx, map_dy, map_slope, in_brdr_cnt
 
-  def get_border_lines(self, img):
+  def rectangle_within_image(self, img):
       # the following is not what we're looking for mapping, but may serve 
       # as a prototype for now. The following cuts away more than the borders
       # to get a clean image. We just want to know what the external borders are.
@@ -347,8 +318,12 @@ class CVAnalysisTools():
       # convert the stitched image to grayscale and threshold it
       # such that all pixels greater than zero are set to 255
       # (foreground) while all others remain 0 (background)
-      gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-      thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)[1]
+
+      # input image is expected to already be gray
+      # gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+      thresh = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY)[1]
+
       # find all external contours in the threshold image then find
       # the *largest* contour which will be the contour/outline of
       # the image
@@ -398,9 +373,91 @@ class CVAnalysisTools():
       # centers : This is array of centers of clusters.
       ret,label,center=cv2.kmeans(Z,K,None,criteria,10,cv2.KMEANS_RANDOM_CENTERS)
       # Now convert back into uint8, and make original image
-      print("compactness, centers:", ret, center)
+      # print("compactness, centers:", ret, center)
       # ret is a single float, label is ?, center is RGB
       center = np.uint8(center)
       res = center[label.flatten()]
       res2 = res.reshape((img.shape))
       return res2
+
+  def order_points(self, pts):
+      # initialzie a list of coordinates that will be ordered
+      # such that the first entry in the list is the top-left,
+      # the second entry is the top-right, the third is the
+      # bottom-right, and the fourth is the bottom-left
+      rect = np.zeros((4, 2), dtype = "float32")
+
+      # the top-left point will have the smallest sum, whereas
+      # the bottom-right point will have the largest sum
+      s = pts.sum(axis = 1)
+      rect[0] = pts[np.argmin(s)]
+      rect[2] = pts[np.argmax(s)]
+
+      # now, compute the difference between the points, the
+      # top-right point will have the smallest difference,
+      # whereas the bottom-left will have the largest difference
+      diff = np.diff(pts, axis = 1)
+      rect[1] = pts[np.argmin(diff)]
+      rect[3] = pts[np.argmax(diff)]
+
+      # return the ordered coordinates
+      return rect
+
+  def four_point_transform(self, image, pts):
+      # obtain a consistent order of the points and unpack them
+      # individually
+      rect = self.order_points(pts)
+      (tl, tr, br, bl) = rect
+      # compute the width of the new image, which will be the
+      # maximum distance between bottom-right and bottom-left
+      # x-coordiates or the top-right and top-left x-coordinates
+      widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+      widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+      maxWidth = max(int(widthA), int(widthB))
+      # compute the height of the new image, which will be the
+      # maximum distance between the top-right and bottom-right
+      # y-coordinates or the top-left and bottom-left y-coordinates
+      heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+      heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+      maxHeight = max(int(heightA), int(heightB))
+      # now that we have the dimensions of the new image, construct
+      # the set of destination points to obtain a "birds eye view",
+      # (i.e. top-down view) of the image, again specifying points
+      # in the top-left, top-right, bottom-right, and bottom-left
+      # order
+      dst = np.array([
+            [0, 0], [maxWidth-1, 0], [maxWidth-1, maxHeight-1], [0, maxHeight-1]
+            ], dtype = "float32")
+     
+      # compute the perspective transform matrix and then apply it
+      M = cv2.getPerspectiveTransform(dst, rect)
+      warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight),  cv2.WARP_INVERSE_MAP)
+      # return the warped image
+      return warped
+
+  #########################
+  # Contours
+  #########################
+  def get_contours(self,img):
+      blurred = cv2.GaussianBlur(img, (5, 5), 0)
+      gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
+      lab = cv2.cvtColor(blurred, cv2.COLOR_BGR2LAB)
+      thresh = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY)[1]
+      # find contours in the thresholded image
+      cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
+              cv2.CHAIN_APPROX_SIMPLE)
+      cnts = imutils.grab_contours(cnts)
+      return cnts
+      
+  def draw_contours(self,img,cnt,text="",def_clr=(0,255,0)):
+      for i,c in enumerate(cnt):
+          # compute the center of the contour
+          M = cv2.moments(c)
+          # cX = int((M["m10"] / M["m00"]) )
+          # cY = int((M["m01"] / M["m00"]) )
+          c = c.astype("int")
+          # print(i,"c",c)
+          itext = text + str(i)
+          cv2.drawContours(img, [c], -1, def_clr, 2)
+          # cv2.putText(img, itext, (cX, cY),
+          #       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)

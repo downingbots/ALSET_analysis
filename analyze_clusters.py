@@ -2,7 +2,7 @@ from sklearn import metrics, linear_model
 from sklearn.metrics import r2_score, mean_squared_error
 # from sklearn.cluster import DBSCAN, kmeans
 from sklearn.cluster import *
-from keypoint import *
+from analyze_keypoints import *
 import cv2 as cv2
 from math import sqrt
 import scipy.stats
@@ -269,7 +269,7 @@ class AnalyzeClusters():
           # centers : This is array of centers of clusters.
           ret,label,center=cv.kmeans(Z,K,None,criteria,10,cv.KMEANS_RANDOM_CENTERS)
           # Now convert back into uint8, and make original image
-          print("compactness, labels, centers:", ret, label.flatten, center)
+          # print("compactness, labels, centers:", ret, label.flatten, center)
           # ret is a single float, label is ?, center is RGB
           center = np.uint8(center)
           res = center[label.flatten()]

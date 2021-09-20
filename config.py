@@ -1,4 +1,5 @@
 import copy
+import numpy as np
 
 class Config():
     def __init__(self):
@@ -525,9 +526,32 @@ class Config():
       self.add_to_func_key_value("MOVEMENT_RESTRICTIONS", self.func_movement_restrictions)
       self.add_to_func_key_value("CLASSIFIER", self.func_classifier)
 
-    ###################
-    # TODO: FIDUCIALS
-    ###################
+      ###################
+      # TODO: FIDUCIALS
+      ###################
+
+      ###################
+      # ANALYSIS
+      ###################
+      self.MAX_ROTATION_RADS = np.pi/4
+      # self.MAP_ROBOT_H_POSE     = 300        # offset from bottom of image to middle of robot
+      # self.MAP_ROBOT_H_POSE     = 200        # offset from bottom of image to middle of robot
+      # self.MAP_ROBOT_H_POSE     = 300        # offset from bottom of image to middle of robot
+      # self.MAP_ROBOT_H_POSE     = 200        # offset from bottom of image to middle of robot
+      # self.MAP_ROBOT_H_POSE     = 300        # offset from bottom of image to middle of robot
+
+      p = 20
+      robot_w, robot_len = 19,25
+      n = 20
+      self.MAP_ROBOT_H_POSE     = n*p        # offset from bottom of image to middle of robot
+      self.MAP_ROBOT_SHAPE      = (n*robot_w,n*robot_len) # rectangle (width, length)
+      self.VIRTUAL_MAP_SIZE = 10000
+      self.ENABLED_ANALYSIS = ["METRICS", "LINES", "KEYPOINTS"]
+      self.INFINITE = 1000000000000000000000
+      self.RADIAN_THRESH = 0.01
+      self.MSE_THRESH    = 140
+      self.SSIM_THRESH   = 0.5
+      self.LBP_THRESH    = 0.05
 
     ###################
     # FUNCTIONS

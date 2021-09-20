@@ -240,7 +240,7 @@ class DSAnalysis():
       print("curr_func_name: ", self.func_app.curr_func_name)
       print("predicted, actual:", self.move_analysis.predict(), action)
       gc.collect()
-      self.move_analysis.add_next_move(action)
+      self.move_analysis.train_predictions(action)
       if self.func_app.curr_func_name == "PARK_ARM_RETRACTED":
         self.analyze_PARetracted(frame_num, action, prev_img, curr_img, done)
         print("curr_func_name: ", self.func_app.curr_func_name)
