@@ -534,17 +534,15 @@ class Config():
       # ANALYSIS
       ###################
       self.MAX_ROTATION_RADS = np.pi/4
-      # self.MAP_ROBOT_H_POSE     = 300        # offset from bottom of image to middle of robot
-      # self.MAP_ROBOT_H_POSE     = 200        # offset from bottom of image to middle of robot
-      # self.MAP_ROBOT_H_POSE     = 300        # offset from bottom of image to middle of robot
       # self.MAP_ROBOT_H_POSE     = 200        # offset from bottom of image to middle of robot
       # self.MAP_ROBOT_H_POSE     = 300        # offset from bottom of image to middle of robot
 
       p = 20
       robot_w, robot_len = 19,25
-      n = 20
+      n = 5
+      m = 3
       self.MAP_ROBOT_H_POSE     = n*p        # offset from bottom of image to middle of robot
-      self.MAP_ROBOT_SHAPE      = (n*robot_w,n*robot_len) # rectangle (width, length)
+      self.MAP_ROBOT_SHAPE      = ((n+m)*robot_w,(n+m)*robot_len) # rectangle (width, length)
       self.VIRTUAL_MAP_SIZE = 10000
       self.ENABLED_ANALYSIS = ["METRICS", "LINES", "KEYPOINTS"]
       self.INFINITE = 1000000000000000000000

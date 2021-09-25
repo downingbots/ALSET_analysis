@@ -105,7 +105,7 @@ def real_map_border(mapimg, ret_outside=True):
       # drawContours() function
       # For our border case, there may be a few dots or small contours that won't
       # be considered part of the border.
-      print("real_map_border count:", len(imagecontours))
+      # print("real_map_border count:", len(imagecontours))
       if len(imagecontours) > 1:
         # print("hierarchy:", hierarchy)
         for i, c  in enumerate(imagecontours):
@@ -475,12 +475,12 @@ def image_in_border(border, image):
       for bpt in border:
         im = cv2.circle(im,bpt[0],3,(255,0,0),-1)
       cv2.imshow("Image with no rectangle", im)
-      cv2.waitKey(0)
-      return image
+      # cv2.waitKey(0)
+      return None
     print("minw, minh, maxw, maxh:", minw, minh, maxw, maxh)
     if minw is None:
       cv2.imshow("Image with None minh/minw", image)
-      cv2.waitKey(0)
+      # cv2.waitKey(0)
     final_image = np.zeros((maxh-minh, maxw-minw), dtype="uint8")
     final_image[0:maxh-minh, 0:maxw-minw] = image[minh:maxh, minw:maxw]
     final_image_disp = final_image.copy()

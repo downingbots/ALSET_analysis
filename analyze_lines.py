@@ -60,20 +60,56 @@ class LineAnalysis():
 
       print("lines:", lines)
       return lines
-  
 
-    def best_line_angle(self, prev_map, curr_map, action, robot_location, frame_num=0):
+    def best_line_pos(self, prev_map, curr_map, action, robot_location=None, frame_num=0):
       def angle_match_count(angle_match, rads, radian_thresh):
           found = False
           for i, [a,c] in enumerate(angle_match):
-            if rad_dif(rads, a) <= radian_thresh:
+            if rad_interval(rads, a) <= radian_thresh:
               found = True
               angle_match[i][1] += 1
           if not found:
-            angle_match.append([rads, 0])
+            angle_match.append([rads, 1])
           return angle_match
 
-      likely_angle = None
+      def offset_h_match_count(offset_h_match, offset_h):
+          found = False
+          for i, [h,c] in enumerate(offset_h_match):
+            if offset_h == h:
+              found = True
+              offset_h_match[i][1] += 1
+          if not found:
+            offset_h_match.append([offset_h, 1])
+          return offset_h_match
+
+      def  offset_h_lines(offset_match, cm_ln, pm_ln, robot_location):
+          # For the robot w location, compute offset h 
+          # h1 - h2 = m1*w1  - m2*w2
+          robot_w = robot_location[1]
+          offset_h = robot_w * (cm_ln[1]-cm_ln[3])/(cm_ln[0]-cm_ln[2]) - robot_w * (pm_ln[1]-pm_ln[3])/(pm_ln[0]-pm_ln[2])
+          print("offset_h", offset_h)
+          offset_h_match_count(offset_match, offset_h)
+          return offset_h
+
+      def offset_h_intersect(offset_match, pt1, pt2):
+          offset_h = pt1[0] - p2[0]
+          offset_h_match_count(offset_match, offset_h)
+          return offset_h
+
+      def best_offset_h(offset_match):
+          if len(offset_match) == 1:
+            return offset_match[0][1]
+          else:
+            full_list = []
+            for i in range(c1+1):
+              full_list.append(h1)
+            z = np.abs(stats.zscore(full_list))
+            cleaned_list = full_list[(z < 3)]  # remove outliers
+            offset_h = round(np.mean(cleaned_list))
+            print(offset_h, len(full_list), len(cleaned_list))
+            return offset_h
+
+
       confidence = 1
       radian_thresh = self.cfg.RADIAN_THRESH
       if self.color_quant_num_clust is not None:
@@ -87,19 +123,21 @@ class LineAnalysis():
         border_shape, border = real_map_border(prev_map)
         pm_floor_clusters = self.cvu.color_quantification(prev_map, K)
         cm_floor_clusters = self.cvu.color_quantification(curr_map, K)
+        # Phase 1: within same images, find intersections and lines slopes
         cm = self.evaluate_lines_in_image(cm_floor_clusters, border)
         pm = self.evaluate_lines_in_image(pm_floor_clusters, border)
         comparison["intersect_rads"] = []
         comparison["line_rads"] = []
+        # Phase 2: across 2 images, make full comparison of 
+        #          angles of intersections and line slopes
         for cm_i, cm_line in enumerate(cm):
           for pm_i, pm_line in enumerate(pm):
             # 
-            # compare intersections
+            #-- compare intersections
             for [cm_i1, cm_i2, cm_pt] in cm_line["intersect"]:
               for [pm_j1, pm_j2, pm_pt] in pm_line["intersect"]:
                 angle = rad_isosceles_triangle(cm_pt, robot_location, pm_pt)
                 comparison["intersect_rads"].append([cm_i, pm_i, cm_pt, pm_pt, angle])
-            # compare line angles
             comparison["line_rads"].append([cm_i, pm_i, rad_dif(cm_line["slope"], pm_line["slope"])])
 
             # todo: compare relative line positions for non-intersecting lines
@@ -109,8 +147,10 @@ class LineAnalysis():
             #   - todo: determine multiple pm lines map to same cm line 
             # todo: bad_match
 
+        # Phase 3: match lines
         print("intersect_rads, line_rads:", comparison["intersect_rads"], comparison["line_rads"])
         angle_match = []
+        offset_match = []
         for i, i_list in enumerate(comparison["intersect_rads"]):
           I_cm_i, I_pm_i, I_cm_pt, I_pm_pt, I_intersect_rads = i_list
           for j, j_list in enumerate(comparison["intersect_rads"]):
@@ -118,18 +158,20 @@ class LineAnalysis():
               continue
             J_cm_i, J_pm_i, J_cm_pt, J_pm_pt, J_intersect_rads = j_list
             # compare the differences in slope, not the slopes themselves
-            if rad_dif(I_intersect_rads, J_intersect_rads) <= radian_thresh:
+            if rad_interval(I_intersect_rads, J_intersect_rads) <= radian_thresh:
               print("good intersect match:",I_intersect_rads, J_intersect_rads, I_cm_i, J_cm_i, I_pm_i, J_pm_i)
               angle_match = angle_match_count(angle_match, I_intersect_rads, radian_thresh)
+              offset_h = offset_h_intersect(J_cm_pt, J_pm_pt)
             # else:
             #  print("bad intersect match:",I_intersect_rads, J_intersect_rads)
           for j, [J_cm_i, J_pm_j, J_rads] in enumerate(comparison["line_rads"]):
             if i >= j:
               continue
             j_rads = j_list[2]
-            if rad_dif(I_intersect_rads, J_rads) <= radian_thresh:
+            if rad_interval(I_intersect_rads, J_rads) <= radian_thresh:
               print("good intersect-slope match:",I_intersect_rads, J_rads, I_cm_i, J_cm_i, J_pm_j, I_pm_i)
               angle_match = angle_match_count(angle_match, I_intersect_rads, radian_thresh)
+              offset_h = offset_h_intersect(cm[J_cm_i], pm[J_pm_j])
             # else:
             #   print("bad intersect match:",I_intersect_rads, J_rads)
         for i, [I_cm_i, I_pm_j, I_rads] in enumerate(comparison["line_rads"]):
@@ -141,26 +183,34 @@ class LineAnalysis():
             # this is a delta slope, but it doesn't need to be less than radian thresh.
             # the lines should be verified to be the same based on location, length, and slope.
             # Ideally the slope would be similar to pevious turn in same direction.
-            if rad_dif(I_rads, J_rads) <= radian_thresh:
+            if rad_interval(I_rads, J_rads) <= radian_thresh:
               print("good slope match:",I_rads, J_rads, I_cm_i, I_pm_j, J_cm_i, J_pm_j)
               angle_match = angle_match_count(angle_match, I_rads, radian_thresh)
+              cmln = cm[I_cm_i]["line"]
+              pmln = pm[J_pm_j]["line"]
+              offset_h = offset_h_lines(offset_match, cmln, pmln, robot_location)
             # else:
             #   print("bad intersect match:",I_rads, J_rads)
 
-        if len(angle_match) >= 1:
-          max_a, max_c = self.cfg.INFINITE, - self.cfg.INFINITE
-          for a,c in angle_match:
-            if c > max_c:
-              max_c = c
-              max_a = a
-          print("Angle match:", max_a, max_c, angle_match)
-          return(max_a)
-        elif len(comparison["intersect_rads"]) >= 1:
-          return(comparison["intersect_rads"][0][4]) 
-        elif len(comparison["line_rads"]) >= 1:
-          return(comparison["line_rads"][0][2]) 
-        else:
-          continue
+        if action in ["LEFT", "RIGHT"]:
+          # return angle
+          if len(angle_match) >= 1:
+            max_a, max_c = self.cfg.INFINITE, - self.cfg.INFINITE
+            for a,c in angle_match:
+              if c > max_c:
+                max_c = c
+                max_a = a
+            print("Angle match:", max_a, max_c, angle_match)
+            return(max_a)
+          elif len(comparison["intersect_rads"]) >= 1:
+            return(comparison["intersect_rads"][0][4]) 
+          elif len(comparison["line_rads"]) >= 1:
+            return(comparison["line_rads"][0][2]) 
+          else:
+            continue
+        elif action in ["FORWARD", "REVERSE"]:
+          offset_h =best_offset_h(offset_match)
+          return round(offset_h)
       return None
 
 
@@ -254,7 +304,7 @@ class LineAnalysis():
               dist_slope = self.arctan2(map_dx, map_dy)
               max_dist = dist
 
-            diff_slope = rad_dif(map_slope, self.arctan2(dx, dy))
+            diff_slope = rad_interval(map_slope, self.arctan2(dx, dy))
             slope_hist.append([angle, diff_slope, in_brdr_cnt])
             print("map, cur slopes:", map_slope, self.arctan2(dx,dy))
             # print("diff slope/min:", diff_slope, min_slope_dif)
@@ -284,7 +334,7 @@ class LineAnalysis():
           # did we rotate too far?
           angle_max = angle
           break
-        elif ((min_slope_dif == 0 or rad_dif(angle_max,angle_min) <= .001)
+        elif ((min_slope_dif == 0 or rad_interval(angle_max,angle_min) <= .001)
           and (round(best_mse_angle,3) == round(min_slope_dif_angle,3) or
                round(best_ssim_angle,3) == round(min_slope_dif_angle,3) or
                round(best_lbp,3) == round(min_slope_dif_angle,3))):

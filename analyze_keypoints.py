@@ -127,12 +127,12 @@ class Keypoints:
     # 
     # When turning left, the new frame's keypoints will appear to be right of the prev frame's kps.
     # 
-    def best_keypoint_angle(self, KP2, action, robot_location, frame_num):
+    def best_keypoint_move(self, KP2, action, robot_location, frame_num):
         #####
         def angle_match_count(angle_match, rads, radian_thresh):
           found = False
           for i, [a,c] in enumerate(angle_match):
-            if rad_dif(rads, a) <= radian_thresh:
+            if rad_interval(rads, a) <= radian_thresh:
               found = True
               angle_match[i][1] += 1
           if not found:
@@ -172,19 +172,24 @@ class Keypoints:
             if (action == "LEFT" and 
                 (abs(kp1.pt[h] - kp2.pt[h]) > abs(kp1.pt[w] - kp2.pt[w]) or kp1.pt[w] >= kp2.pt[w])):
               continue
-            rads = rad_isosceles_triangle(kp1.pt, rl, kp2.pt)
-            if rads is None:
+            elif (action == "RIGHT" and 
+                (abs(kp1.pt[h] - kp2.pt[h]) > abs(kp1.pt[w] - kp2.pt[w]) or kp1.pt[w] <= kp2.pt[w])):
+              print("Right assert: KP fails")
               continue
-            angle_match = angle_match_count(angle_match, rads, self.cfg.RADIAN_THRESH)
+            if action in ["LEFT", "RIGHT"]:
+              rads = rad_isosceles_triangle(kp1.pt, rl, kp2.pt)
+              if rads is None:
+                continue
+              angle_match = angle_match_count(angle_match, rads, self.cfg.RADIAN_THRESH)
 
-        if len(angle_match) >= 1:
+        if action in ["LEFT", "RIGHT"] and len(angle_match) >= 1:
           max_a, max_c = self.cfg.INFINITE, -self.cfg.INFINITE
           for a,c in angle_match:
             if c > max_c:
               max_c = c
               max_a = a
-          print("Angle match:", max_a, max_c, angle_match)
-          return(max_a)
+            print("Angle match:", max_a, max_c, angle_match)
+            return(max_a)
         return None
 
     def compare_homography(self,KP2,include_dist=True):
@@ -424,9 +429,9 @@ class Keypoints:
             best_map_pts, best_new_map_pts = map_pts, new_map_rot_pts
             print("new best kp angle:",best_map_pts,best_new_map_pts)
         # we're now in radians, so need much smaller threshold
-        diff_angle = self.rad_dif(max_angle, min_angle)
+        diff_angle = self.rad_interval(max_angle, min_angle)
   
-        if abs(self.rad_dif(max_angle,min_angle)) <= .001 or delta_h == 0:
+        if abs(self.rad_interval(max_angle,min_angle)) <= .001 or delta_h == 0:
           break
         elif delta_h > 0:
           min_angle = angle
