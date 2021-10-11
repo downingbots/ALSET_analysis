@@ -59,8 +59,10 @@ class AnalyzeMap():
         self.cvu = CVAnalysisTools()
         self.cfg = Config()
         self.robot_orientation = 0  # starting point in radians
-        self.robot_location = [0,0]  # starting point 
-        print("1orientation:", self.robot_orientation)
+        # need to add borders to find location in map
+        self.robot_location = None
+        self.robot_origin = None
+        self.robot_location_from_origin = [0,0]  # starting point 
         self.lna = LineAnalysis()
 
     def real_to_virtual_map_coordinates(self, pt):
@@ -80,9 +82,10 @@ class AnalyzeMap():
     def get_birds_eye_view(self, image):
         w = image.shape[0]
         h = image.shape[1]
-        new_w = int(48 * w / 32)
+        new_w = int(w * self.cfg.BIRDS_EYE_RATIO)
         bdr   = int((new_w - w) / 2)
-        print("new_w, w, bdr:", 55*w/32, w, (new_w - w)/2)
+        # print("new_w, w, bdr:", 55*w/32, w, (new_w - w)/2)
+        print("new_w, w, bdr:",new_w, w, (new_w - w)/2)
         image = cv2.copyMakeBorder( image, top=0, bottom=0, left=bdr, right=bdr,
             borderType=cv2.BORDER_CONSTANT, value=[0, 0, 0])
 
@@ -93,8 +96,8 @@ class AnalyzeMap():
         # Minv = cv2.getPerspectiveTransform(dst, src) # Inverse transformation
         birds_eye_view = cv2.warpPerspective(image, M, (new_w, h)) # Image warping
 
-        self.gripper_height = int(8 * h / 32)
-        self.gripper_width = int(11 * new_w / 32)
+        self.gripper_height = int(h * self.cfg.GRIPPER_HEIGHT_RATIO)
+        self.gripper_width = int(new_w * self.cfg.GRIPPER_WIDTH_RATIO)
         print("gripper h,w:", self.gripper_height, self.gripper_width)
 
         self.parked_gripper_left = np.zeros((self.gripper_height, self.gripper_width, 3), dtype=np.uint8)
@@ -115,25 +118,6 @@ class AnalyzeMap():
         # cv2.destroyAllWindows()
         return birds_eye_view
 
-    #########################
-    # Util Func
-    #########################
-    def move_state(self, action, new_above_view_img):
-        if self.curr_move is not None:
-          self.prev_move = self.curr_move.copy()
-        self.curr_move = new_above_view_img.copy()
-
-    def show_rot(self, new_map):
-      pt = [int(self.robot_location[1]), int(self.robot_location[0])] # circle uses [w,h]
-      new_map = cv2.circle(new_map,pt,3,(255,0,0),-1)
-      pt = [int(new_map.shape[1]/2), int(new_map.shape[0]/2)]
-      new_map = cv2.circle(new_map,pt,3,(255,0,0),-1)
-      for angle in range(0,np.pi/6, 0.1):
-        new_map_rot = rotate_about_robot(new_map, angle, self.robot_location)
-        if self.frame_num >= self.stop_at_frame:
-          cv2.imshow(str(angle), new_map_rot)
-          cv2.waitKey(0)
-
     #############################
     # Lines
     # Pre-rotation Input1: prev_new_map, curr_new_map
@@ -142,22 +126,48 @@ class AnalyzeMap():
     def analyze_move_by_line(self, prev_map_frame, curr_map_frame, action, frame_num=0):
         pm = prev_map_frame.copy()
         cm = curr_map_frame.copy()
+        best_move = None
+        best_mse = self.cfg.INFINITE
         # Compute Color Quant
-        pos = self.lna.best_line_pos(pm, cm, action, self.robot_location, frame_num=0)
+        move_list = self.lna.best_line_pos(pm, cm, action, self.robot_origin, frame_num=0)
+        print("new ln list:", move_list)
+        # get list of possible positions and run mse on them to evaluate?
+        if move_list is None or len(move_list) == 0:
+          best_move = None
+        elif len(move_list) == 1:
+          best_move = move_list[0]
+        else:
+          for mv in move_list:
+            if action in ["FORWARD","REVERSE"]:
+              print(action, "move:", mv, cm.shape[0],cm.shape[1])
+              if abs(mv) > cm.shape[0]:
+                continue
+              try:
+                curr_move = replace_border(curr_map_frame.copy(), cm.shape[0], cm.shape[1], round(mv), 0)
+              except:
+                  continue
+            elif action in ["LEFT","RIGHT"]:
+              curr_move = rotate_about_robot(curr_map_frame.copy(), mv, self.robot_origin) 
+            mse, ssim, lbp = self.score_metrics(action, prev_map_frame, curr_move)
+            if mse is not None and mse < best_mse:
+              best_mse = mse
+              best_move = mv
+        if best_move is None:
+          return None
         if action == "LEFT":
-          angle = pos
+          angle = best_move
           return angle
         elif action == "RIGHT":
           # angle computed with rad_interval to find slope diff, always pos
-          angle = -pos
+          angle = -best_move
           print("RIGHT line angle:", angle)
           return angle    
           # return angle  
         elif action == "FORWARD":
-          pixels_moved = pos
+          pixels_moved = round(best_move)
           return pixels_moved
         elif action == "REVERSE":
-          pixels_moved = pos
+          pixels_moved = round(best_move)
           return -pixels_moved
         else:
           print("expected L/R/Fwd/Rev")
@@ -179,9 +189,11 @@ class AnalyzeMap():
         # look for prev/curr KPs that are same distance to robot_location
         # find angles between these KPs.
         # find same angles. 
+        best_move = None
+        best_mse = self.cfg.INFINITE
         pm = prev_map_frame.copy()
         cm = curr_map_frame.copy()
-        print("pm,cm shape", (pm.shape), (cm.shape), self.robot_location, self.robot_location_no_border)
+        # print("pm,cm shape", (pm.shape), (cm.shape))
         if kp_mode == "BEST":
           kp_mode_list = ["SIFT", "ORB", "FEATURE"]
         else:
@@ -189,23 +201,41 @@ class AnalyzeMap():
         for mode in kp_mode_list:
           pm_kp = Keypoints(pm,kp_mode=mode)
           cm_kp = Keypoints(cm,kp_mode=mode)
-          move = pm_kp.best_keypoint_move(cm_kp, action, self.robot_location_no_border, frame_num=0)
-          if move is None:
+          # robot location relative to the two frames
+          rbt_loc = [0, self.cfg.MAP_ROBOT_H_POSE] 
+          move_list = pm_kp.best_keypoint_move(cm_kp, action, rbt_loc, frame_num=0)
+          print(mode, "new KP list:", move_list)
+          if move_list is None or len(move_list) == 0:
             continue
-        if move is None:
+          if len(move_list) == 1:
+            best_move = move_list[0]
+          else:
+            for mv in move_list:
+              if action in ["FORWARD","REVERSE"]:
+                if abs(mv) > cm.shape[0]:
+                  continue
+                try:
+                  curr_move = replace_border(cm.copy(), cm.shape[0], cm.shape[1], int(mv), 0)
+                except:
+                  continue
+              elif action in ["LEFT","REVERSE"]:
+                curr_move = rotate_about_robot(cm.copy(), mv, self.robot_origin)
+              mse, ssim, lbp = self.score_metrics(action, pm, curr_move)
+              if mse is not None and mse < best_mse:
+                best_mse = mse
+                best_move = mv
+        if best_move is None:
           return None
         if action == "LEFT":
-          angle = move
+          angle = best_move
           return angle
         elif action == "RIGHT":
-          angle = move
-          print("RIGHT kp angle:", angle)
-          return angle  # already negative
+          angle = best_move
         elif action == "FORWARD":
-          offset_h = move
+          offset_h = round(best_move)
           return offset_h 
         elif action == "REVERSE":
-          offset_h = move
+          offset_h = round(best_move)
           return offset_h 
         else:
           print("expected L/R/Fwd/Rev")
@@ -217,17 +247,22 @@ class AnalyzeMap():
     # Input: Map, Intersected Rotated New Map, Phase (ignored)
     # Output: Score for current New Map. No estimated Rotation or Offsets
     #########################
-    def score_metrics(self, action, map, rotated_new_map, show_intersect=False):
+    def score_metrics(self, action, map, rotated_new_map, show_intersect=False, mse_only=True):
         mol = map.copy()
         rnm = rotated_new_map.copy()
         gray_mol = cv2.cvtColor(mol, cv2.COLOR_BGR2GRAY)
         gray_rnm = cv2.cvtColor(rnm, cv2.COLOR_BGR2GRAY)
+        mse_score, ssim_score, lbp_score = None, None, None
         shape, mol_border = real_map_border(mol)
+        # print("rnm:",len(rnm))
+        # print("r m b:",real_map_border(rnm))
         shape, rnm_border = real_map_border(rnm)
+        if rnm_border is None:
+          return self.cfg.INFINITE, self.cfg.INFINITE, self.cfg.INFINITE
         mol_maxh, mol_minh, mol_maxw, mol_minw = get_min_max_borders(mol_border)
         rnm_maxh, rnm_minh, rnm_maxw, rnm_minw = get_min_max_borders(rnm_border)
-        pct_w = 4 * abs(rnm_maxw - mol_maxw) / rnm_maxw
-        pct_h = 4 * abs(rnm_maxh - mol_maxh) / rnm_maxh
+        pct_w = min(4 * abs(rnm_maxw - mol_maxw) / rnm_maxw, 1)
+        pct_h = min(4 * abs(rnm_maxh - mol_maxh) / rnm_maxh, 1)
         # print("mol_border:", mol_border)
         # print("rnm_border:", rnm_border)
         intersect_border = intersect_borders(mol_border, rnm_border)
@@ -240,7 +275,8 @@ class AnalyzeMap():
         intersect_rnm = image_in_border(intersect_border, gray_rnm)
         if intersect_mol is None or intersect_rnm is None:
           return self.cfg.INFINITE, self.cfg.INFINITE, self.cfg.INFINITE
-        if action == "LEFT" or action == "RIGHT":
+        if action in ["LEFT","RIGHT","FORWARD","REVERSE"]:
+          # finds intersecting rectangle for any action.
           try:
             shape, intersect_mol_border = real_map_border(intersect_mol)
             shape, intersect_rnm_border = real_map_border(intersect_rnm)
@@ -277,7 +313,7 @@ class AnalyzeMap():
           return self.cfg.INFINITE, self.cfg.INFINITE, self.cfg.INFINITE
         radius = min(intersect_mol.shape[0], intersect_mol.shape[1])
         num_radius = max(int((radius-1) / 6), 2)
-        mse_score,ssim_score = self.compare_images(intersect_mol, intersect_rnm, "compare")
+        mse_score,ssim_score = self.compare_images(intersect_mol, intersect_rnm, "compare", mse_only)
         i, tot_lbp_score = 0, 0
         if show_intersect:
           cv2.imshow("mol", intersect_mol)
@@ -286,13 +322,16 @@ class AnalyzeMap():
           cv2.imshow("full rnm", rnm)
           cv2.waitKey(0)
         # print("radius", radius, num_radius)
-        for rad in range(1,(radius-1), num_radius):
-          lbp = LocalBinaryPattern(intersect_mol, rad)
-          lbp_score = lbp.get_score(intersect_rnm)
-          tot_lbp_score += lbp_score
-          i += 1
-          # print("lbp: ", i, lbp_score, rad, radius)
-          lbp_score = tot_lbp_score / (i)
+        if mse_only:
+          lbp_score = self.cfg.INFINITE
+        else:
+          for rad in range(1,(radius-1), num_radius):
+            lbp = LocalBinaryPattern(intersect_mol, rad)
+            lbp_score = lbp.get_score(intersect_rnm)
+            tot_lbp_score += lbp_score
+            i += 1
+            # print("lbp: ", i, lbp_score, rad, radius)
+            lbp_score = tot_lbp_score / (i)
         # return mse_results, ssim_results, lbp_results
         return mse_score, ssim_score, lbp_score
 
@@ -312,37 +351,50 @@ class AnalyzeMap():
         mse, ssim, lbp, metric, pos = [], [], [], [], []
         prev_move = add_border(prev_frame.copy(), self.border_buffer)
         for k in range(start_N,N):
-          k_interval = rad_interval(end_pos,start_pos)*k*.125
-          if k_interval <= self.cfg.RADIAN_THRESH:
-            k_interval = self.cfg.RADIAN_THRESH
+          if mode == "ROTATE":
+            k_interval = rad_interval(end_pos,start_pos)*k*.125
+            if k_interval <= self.cfg.RADIAN_THRESH:
+              k_interval = self.cfg.RADIAN_THRESH
+          elif mode in ["OFFSET_H", "OFFSET_W"]:
+            k_interval = round((end_pos-start_pos)*k*.125)
+            if k_interval <= 1:
+              k_interval = 1
+          # measure input
           # measure input
           if k < 7:  
             # gather some data to get basic MSE curve
             # from 7 interior points followed by the two endpoints 
-            mse_pos = rad_sum2(action, start_pos, k_interval)
+            if mode == "ROTATE":
+              mse_pos = rad_sum2(action, start_pos, k_interval)
+            elif mode in ["OFFSET_H", "OFFSET_W"]:
+              mse_pos = round(start_pos + k_interval)
             print(action, "mse_pos:", mse_pos, start_pos, end_pos)
           elif k == 7:  
               mse_pos = start_pos
           elif k == 8:  
+            if mode == "ROTATE":
               mse_pos = rad_dif(end_pos, 0)
+            elif mode in ["OFFSET_H", "OFFSET_W"]:
+              mse_pos = end_pos
           elif k < 16:  
             # drill down to 7 finer resolution values within the min range
             if pos_lower is None:
-              print("mse,pos", len(mse), len(pos))
-              mse_z = np.polyfit(mse, pos, 2)
-              mse_f = np.poly1d(mse_z)
-              # predict new value
-              prev_mse_score  = mse_score
-              prev_ssim_score = ssim_score
-              prev_lbp_score  = lbp_score
-  
-              # get local minima for MSE
-              mse_crit = mse_f.deriv().r
-              mse_r_crit = mse_crit[mse_crit.imag==0].real
-              mse_test = mse_f.deriv(2)(mse_r_crit)
-              mse_x_min = mse_r_crit[mse_test>0]
-              mse_y_min = mse_f(mse_x_min)
-              print("mse_x_min, mse_y_min:", mse_x_min, mse_y_min)
+              if len(mse) != 0 and len(pos) != 0:
+                print("mse,pos", len(mse), len(pos))
+                mse_z = np.polyfit(mse, pos, 2)
+                mse_f = np.poly1d(mse_z)
+                # predict new value
+                prev_mse_score  = mse_score
+                prev_ssim_score = ssim_score
+                prev_lbp_score  = lbp_score
+    
+                # get local minima for MSE
+                mse_crit = mse_f.deriv().r
+                mse_r_crit = mse_crit[mse_crit.imag==0].real
+                mse_test = mse_f.deriv(2)(mse_r_crit)
+                mse_x_min = mse_r_crit[mse_test>0]
+                mse_y_min = mse_f(mse_x_min)
+                print("mse_x_min, mse_y_min:", mse_x_min, mse_y_min)
 
               # Hopefully, stats can narrow this down in the future
               # [0.18868234 0.04772681]
@@ -350,12 +402,12 @@ class AnalyzeMap():
                 mse_y_min = min(mse) 
                 min_index = mse.index(mse_y_min)
                 mse_x_min = pos[min_index]
-                if min_index == 0:
+                if mode == "ROTATE" and min_index == 0:
                   increment = rad_interval(end_pos,start_pos)*.125/2
                   pos_lower = start_pos
                   pos_upper = rad_sum2(action, pos_lower, increment)
                   print(action, "pos_low/up3:", pos_lower, pos_upper)
-                elif min_index == len(mse)-1:
+                elif mode == "ROTATE" and min_index == len(mse)-1:
                   increment = rad_interval(end_pos,start_pos)*.125/2
                   pos_upper = rad_dif2(action, pos_lower, increment)
                   print(action, "pos_low/up1:", pos_lower, pos_upper)
@@ -365,9 +417,9 @@ class AnalyzeMap():
                   pos_upper = rad_sum2(action, mse_x_min, increment)
                   print(action, "pos_low/up2:", pos_lower, pos_upper)
                 else:
-                  increment = (end_pos-start_pos)*.125/2
-                  pos_lower = mse_x_min - increment/2
-                  pos_upper = mse_x_min + increment/2
+                  increment = round((end_pos-start_pos)*.125/2)
+                  pos_lower = mse_x_min - increment
+                  pos_upper = mse_x_min + increment
               else:
                 for x in range(8):
                   if mode == "ROTATE":
@@ -395,21 +447,21 @@ class AnalyzeMap():
                       print(action, "pos_low/up5:", pos_lower, pos_upper)
                       break
                   elif mode == "OFFSET_H" or mode == "OFFSET_W":
-                    pos_lower = start_pos + (end_pos-start_pos)*x*.125
-                    pos_upper = start_pos + (end_pos-start_pos)*(x+1)*.125
+                    pos_lower = round(start_pos + (end_pos-start_pos)*x*.125)
+                    pos_upper = round(start_pos + (end_pos-start_pos)*(x+1)*.125)
                     print("pos lower, upper, mse_x_min:", pos, pos, mse_x_min)
                     if len(mse_x_min) > 1:
-                      increment = (end_pos-start_pos)*.125
-                      mse_pos = start_pos + increment/2 + increment*x
+                      increment = round((end_pos-start_pos)*.125)
+                      mse_pos = round(start_pos + increment/2 + increment*x)
                     elif pos_lower < mse_x_min and mse_x_min < pos_upper:
                       break
                     elif pos_lower == mse_x_min:
-                      mid_range = (pos_upper-pos_upper) * 0.125 / 2
+                      mid_range = round((pos_upper-pos_upper) * 0.125 / 2)
                       pos_upper = pos_lower + mid_range
                       pos_lower = pos_lower - mid_range
                       break
                     elif mse_x_min == pos_upper:
-                      mid_range = (pos_upper-pos_lower) * 0.125 / 2
+                      mid_range = round((pos_upper-pos_lower) * 0.125 / 2)
                       pos_lower = pos_upper - pos_range
                       pos_upper = pos_upper + pos_range
                       if pos_upper > end_pos:
@@ -422,7 +474,7 @@ class AnalyzeMap():
               mse_pos = rad_sum2(action, pos_lower, rad_interval(pos_upper,pos_lower)*x*.125)
               print(action, "low, dif:", mse_pos, rad_interval(pos_upper,pos_lower))
             elif mode == "OFFSET_H" or mode == "OFFSET_W":
-              mse_pos = pos_lower + (pos_upper-pos_lower)*x*.125
+              mse_pos = round(pos_lower + (pos_upper-pos_lower)*x*.125)
 
             print(k, "position:", mse_pos)
           else:
@@ -464,40 +516,43 @@ class AnalyzeMap():
           curr_move = curr_frame.copy()
           curr_move = add_border(curr_move, self.border_buffer)
           if mode == "ROTATE":
-            curr_move = rotate_about_robot(curr_move, mse_pos, self.robot_location)
-          elif mode == "OFFSET_H":
-            curr_move = replace_border(curr_move, curr_move.shape[0], curr_move.shape[1], self.robot_location[0]+mse_pos, self.robot_location[1])
-          elif mode == "OFFSET_W":
-            curr_move = replace_border(curr_move, curr_move.shape[0], curr_move.shape[1], self.robot_location[0], self.robot_location[1] + mse_pos)
+            curr_move = rotate_about_robot(curr_move, mse_pos, self.robot_origin)
+          elif mode == "OFFSET_H" and mse_pos is not None:
+            curr_move = replace_border(curr_move, curr_move.shape[0], curr_move.shape[1], int(self.robot_location_from_origin[0]+mse_pos), self.robot_location_from_origin[1])
+          elif mode == "OFFSET_W" and mse_pos is not None:
+            curr_move = replace_border(curr_move, curr_move.shape[0], curr_move.shape[1], self.robot_location_from_origin[0], int(self.robot_location_from_origin[1] + mse_pos))
 
+          elif mse_pos is None:
+            print("mse_pos is None")
           # measure output
           mse_score, ssim_score, lbp_score = self.score_metrics(action, prev_move, curr_move, dbg_compare)
           metric_score = ((mse_score)*(ssim_score)*(lbp_score))
           print("mse_pos", mse_pos)
-          pos.append(mse_pos)
-          mse.append(mse_score)
-          ssim.append(ssim_score)
-          lbp.append(lbp_score)
-          metric.append(metric_score)
-          if mse_score < best_mse_score:
-            best_mse_score = mse_score 
-            best_mse_pos = mse_pos 
-          if ssim_score < best_ssim_score:
-            best_ssim_score = ssim_score 
-            best_ssim_pos = mse_pos 
-          if lbp_score < best_lbp_score:
-            best_lbp_score = lbp_score 
-            best_lbp_pos = mse_pos 
-          if metric_score < best_metric_score:
-            best_metric_score = metric_score 
-            best_metric_pos = mse_pos 
+          if mse_pos is not None and mse_score is not None:
+            pos.append(mse_pos)
+            mse.append(mse_score)
+            ssim.append(ssim_score)
+            lbp.append(lbp_score)
+            metric.append(metric_score)
+            if mse_score < best_mse_score:
+              best_mse_score = mse_score 
+              best_mse_pos = mse_pos 
+            if ssim_score < best_ssim_score:
+              best_ssim_score = ssim_score 
+              best_ssim_pos = mse_pos 
+            if lbp_score < best_lbp_score:
+              best_lbp_score = lbp_score 
+              best_lbp_pos = mse_pos 
+            if metric_score < best_metric_score:
+              best_metric_score = metric_score 
+              best_metric_pos = mse_pos 
 
           # todo: store frame, pos, metric scores in history for future analysis
           print("pos, score1:", (best_mse_pos, best_mse_score), (best_ssim_pos, best_ssim_score)) 
           print("pos, score2:", (best_lbp_pos, best_lbp_score), (best_metric_pos, best_metric_score))
           print("pos, score3:", (mse_pos, mse_score, ssim_score, lbp_score))
-        if self.frame_num >= self.stop_at_frame:
-          ### show results
+        if False and self.frame_num >= self.stop_at_frame:
+          ### Plot Metric Results
           plt.figure(figsize=(15,9))
           plt.subplot(211);plt.title("Curve fit");plt.xlabel("samples - k")
           mse_plot = []
@@ -588,10 +643,12 @@ class AnalyzeMap():
         # the two images are
         return err
 
-    def compare_images(self, imageA, imageB, title=None):
+    def compare_images(self, imageA, imageB, mse_only=True, title=None):
         # compute the mean squared error and structural similarity
         # index for the images
         m = self.mean_sq_err(imageA, imageB)
+        if mse_only:
+          return m, self.cfg.INFINITE
         try:
           s = ssim(imageA, imageB)
           s = 1 - s   # make "lower is better"
@@ -645,20 +702,20 @@ class AnalyzeMap():
         new_angle = None
         best_angle = None
         best_mse = None
-        height,width,ch = self.curr_move.shape
+        height,width,ch = curr_frame.shape
         # for mode in ["SIFT", "FEATURE", "ROOTSIFT", "ORB", "SURF"]:
         # for mode in ["SIFT", "FEATURE", "ROOTSIFT", "ORB"]:
         metrics = {"LINE":{"MSE":None},"KP":{"MSE":None},"LMS":{"MSE":None}}
         for mode in ["LINE", "KP", "LMS"]:
           ##################################################################
           if mode == "LINE":
-            new_angle_ln = self.analyze_move_by_line(self.prev_move, self.curr_move, action, frame_num=0)
+            new_angle_ln = self.analyze_move_by_line(prev_frame, curr_frame, action, frame_num=0)
             print("new ln angle: ", new_angle_ln)
             print("##########################")
             new_angle = new_angle_ln
           ##################################################################
           elif mode == "KP":
-            new_angle_kp = self.analyze_move_by_kp(self.prev_move, self.curr_move, action, frame_num=0, kp_mode="BEST")
+            new_angle_kp = self.analyze_move_by_kp(prev_frame, curr_frame, action, frame_num=0, kp_mode="BEST")
             print("new kp angle: ", mode, new_angle_kp)
             print("##########################")
             new_angle = new_angle_kp
@@ -686,8 +743,8 @@ class AnalyzeMap():
                 end_pos = rad_sum2(action, mid_pos, interval)
                 print("MSE search near LINE and KP angles only:", new_angle_ln, new_angle_kp)
                 start_N = 8
-            new_angle_lms = self.find_lmse(action, "ROTATE", self.prev_move,
-                          self.curr_move, start_pos=start_pos,
+            new_angle_lms = self.find_lmse(action, "ROTATE", prev_frame,
+                          curr_frame, start_pos=start_pos,
                           end_pos=end_pos,
                           frame_num=frame_num, start_N=0)
             # new angle should never be outside of the start/end range
@@ -695,39 +752,32 @@ class AnalyzeMap():
               print("Error: angle out of range:", end_pos, start_pos, new_angle_lms)
 
             new_angle = new_angle_lms
-            print("new mse angle: ", mode, new_angle)
             print("##########################")
           ##################################################################
           elif mode == "MANUAL":
-            new_angle, off_h, off_w = self.manual_tuning(self.frame_num)
+            new_angle, off_h, off_w = self.manual_tuning(frame_num)
           else:
             continue
           ##################################################################
+          # compute each method's MSE and return the best one.
+          # local orientation is relative to local/previous frame.
+          # Global orientation is computed in self.analyze()
           if new_angle is None:
             continue
-          # cv2.imshow("curr_move:", self.curr_move)
-          new_map = add_border(self.curr_move.copy(), self.border_buffer)
+          rotated_new_map = add_border(curr_frame.copy(), self.border_buffer)
+          prev_map = add_border(prev_frame.copy(), self.border_buffer)
           # cv2.imshow("orig new_map:", new_map)
-          rotated_new_map = new_map.copy()  # for resilience against bugs
-          print("robot location", self.robot_location, new_angle, self.robot_orientation)
-          pt2 = [int(self.robot_location[1]), int(self.robot_location[0])]
-          pt2[1] += self.cfg.MAP_ROBOT_H_POSE
-          rot_angle = rad_sum(self.robot_orientation, new_angle)
-          print("2orientation:", self.robot_orientation)
-          rotated_new_map = rotate_about_robot(rotated_new_map, rot_angle, pt2)
-          metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] = self.score_metrics(action, self.map, rotated_new_map)
+          # local position is equivelent to robot_origin 
+          rotated_new_map = rotate_about_robot(rotated_new_map, new_angle, self.robot_origin) 
+          metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] = self.score_metrics(action, prev_map, rotated_new_map)
           if best_mse is None or metrics[mode]["MSE"] < best_mse:
             best_mse = metrics[mode]["MSE"]
             best_angle = new_angle
-          print(mode, "mse, ssim, lbp metrics: ",
-            metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] )
-
-        if action in ["LEFT", "RIGHT"]:
-          self.robot_orientation = rad_sum2(action, self.robot_orientation, best_angle)
-          print("3orientation:", self.robot_orientation)
-          self.map = self.merge_maps(self.map, rotated_new_map)
-       
-        return 
+          # print(mode, "mse, ssim, lbp metrics: ",
+          #   metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] )
+          print(frame_num, mode, "mse: ", metrics[mode]["MSE"])
+        print("ln, kp, lms angle:", new_angle_ln, new_angle_kp, new_angle_lms)
+        return best_angle
 
     def analyze_fwd_rev(self, action, prev_frame, curr_frame, frame_num=0):
           #####################################################################
@@ -743,18 +793,19 @@ class AnalyzeMap():
           # result.
           #####################################################################
           # initialize images and map for new move
-          height,width,ch = self.curr_move.shape
+          best_mse, best_move = None, None
+          height,width,ch = curr_frame.shape
           metrics = {"LINE":{},"KP":{},"LMS":{}}
           for mode in ["LINE", "KP", "LMS"]:
             ##################################################################
             if mode == "LINE":
-              pixels_moved_ln = self.analyze_move_by_line(self.prev_move, self.curr_move, action, frame_num=0)
+              pixels_moved_ln = self.analyze_move_by_line(prev_frame, curr_frame, action, frame_num=0)
               print("pixels moved by line: ", pixels_moved_ln)
               print("##########################")
               pixels_moved = pixels_moved_ln
             ##################################################################
             elif mode == "KP":
-              pixels_moved_kp = self.analyze_move_by_kp(self.prev_move, self.curr_move, action, frame_num=0, kp_mode="BEST")
+              pixels_moved_kp = self.analyze_move_by_kp(prev_frame, curr_frame, action, frame_num=0, kp_mode="BEST")
               print("pixels_moved_kp: ", pixels_moved_kp)
               print("##########################")
               pixels_moved = pixels_moved_kp
@@ -762,14 +813,16 @@ class AnalyzeMap():
             elif mode == "LMS":
               # start_pos is a local prev/cur comparison, not based on
               # global positioning on map.
+              min_overlap = 10
               if action == "FORWARD":
-                start_pos = self.curr_move.shape[0]
+                # need some minimal overlap
+                start_pos = curr_frame.shape[0] - min_overlap
                 end_pos = 0
               elif action == "REVERSE":
-                start_pos = self.curr_move.shape[0]
-                end_pos = 0
+                start_pos = curr_frame.shape[0] 
+                end_pos = 0 + min_overlap
               pixels_moved_mse = self.find_lmse(action, "OFFSET_H", 
-                            self.prev_move, self.curr_move, start_pos=start_pos,
+                            prev_frame, curr_frame, start_pos=start_pos,
                             end_pos=end_pos, frame_num=frame_num)
               pixels_moved = pixels_moved_mse 
               print("pixels_moved_mse: ", pixels_moved_mse)
@@ -780,48 +833,29 @@ class AnalyzeMap():
               pixels_moved = off_h
 
             ##################################################################
-            # cv2.imshow("curr_move:", self.curr_move)
-            new_map = add_border(self.curr_move.copy(), self.border_buffer)
-            if pixels_moved is not None:
-              angle = self.robot_orientation
-              print("4orientation:", self.robot_orientation)
-              [pix_h, pix_w] = [round(pixels_moved * math.cos(angle)), round(pixels_moved * math.sin(angle))]
-              self.robot_location[0] += round(pix_h)
-              self.robot_location[1] += round(pix_w)
-              self.robot_location_no_border[0] += round(pix_h)
-              self.robot_location_no_border[1] += round(pix_w)
-              new_map = replace_border(new_map, new_map.shape[0], new_map.shape[1], self.robot_location[0], self.robot_location[1])
-
-            # cv2.imshow("orig new_map:", new_map)
-            pt2 = [int(self.robot_location[1]), int(self.robot_location[0])]
-            pt2[1] += self.cfg.MAP_ROBOT_H_POSE
-            print("2orientation:", self.robot_orientation)
-            # rotate to global map position
-            new_map = rotate_about_robot(new_map, self.robot_orientation, pt2)
-            metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] = self.score_metrics(action, self.map, new_map)
+            # compute each method's MSE and return the best one.
+            # local orientation is relative to local/previous frame.
+            # In local frame, the robot moves straight pixels_moved. 
+            # No rotation in local view.
+            # Global orientation is computed in self.analyze()
+            if pixels_moved is None:
+              continue
+            new_map = add_border(curr_frame.copy(), self.border_buffer)
+            try:
+              new_map = replace_border(new_map, int(new_map.shape[0]), int(new_map.shape[1]), pixels_moved, 0)
+            except:
+              continue
+            prev_map = add_border(prev_frame.copy(), self.border_buffer)
+            metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] = self.score_metrics(action, prev_map, new_map)
             print(mode, "mse, ssim, lbp metrics: ",
               metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] )
-            if (# metrics[mode]["MSE"] <= self.cfg.MSE_THRESH and
-                metrics[mode]["SSIM"] <= self.cfg.SSIM_THRESH and
-                metrics[mode]["LBP"]  <= self.cfg.LBP_THRESH):
-              break
+            if best_mse is None or metrics[mode]["MSE"] < best_mse:
+              best_mse = metrics[mode]["MSE"]
+              best_move = pixels_moved 
+              print(mode, action, "new best_move:", best_move, best_mse)
+          print("ln, kp, lms movement:", pixels_moved_ln, pixels_moved_kp, pixels_moved_mse)
+          return best_move 
 
-          self.map = self.merge_maps(self.map, new_map)
-          pt2 = [int(self.robot_location[1]), int(self.robot_location[0])]
-          self.map_overlay = self.map.copy()
-          # draw center of robot on map_overlay
-          self.map_overlay = cv2.circle(self.map_overlay,pt2,3,(255,0,0),-1)
-          # draw rotated robot on map_overlay
-          rot_rect = (pt2, self.cfg.MAP_ROBOT_SHAPE, radians_to_degrees(-self.robot_orientation))
-          print("5orientation:", self.robot_orientation)
-          box = cv2.boxPoints(rot_rect) 
-          box = np.int0(box)
-          cv2.drawContours(self.map_overlay,[box],0,(0,0,255),2)
-
-          rotated_robot_rectangle = cv2.circle(rotated_new_map,pt2,3,(255,0,0),-1)
-          if action in ["FORWARD", "REVERSE"]:
-            self.robot_position
-            self.map = self.merge_maps(self.map, new_map)
 
     #################################
     # Map merging
@@ -866,19 +900,18 @@ class AnalyzeMap():
           # make overlay map and add robot in current position.
           # in future, can add position of each move leading to this point
 
-          pt2 = [int(self.robot_location[1]), int(self.robot_location[0])]
+          loc = hw_to_xy(self.robot_location.copy())
           # draw center of robot on map_overlay
-          self.map_overlay = cv2.circle(self.map_overlay,pt2,3,(255,0,0),-1)
+          self.map_overlay = cv2.circle(self.map_overlay,loc,3,(255,0,0),-1)
           # draw rotated robot on map_overlay
-          rot_rect = (pt2, self.cfg.MAP_ROBOT_SHAPE, radians_to_degrees(-self.robot_orientation))
-          print("6orientation:", self.robot_orientation)
+          rot_rect = (loc, self.cfg.MAP_ROBOT_SHAPE, radians_to_degrees(-self.robot_orientation))
           box = cv2.boxPoints(rot_rect)
           box = np.int0(box)
           cv2.drawContours(self.map_overlay,[box],0,(0,0,255),2)
 
-          rotated_robot_rectangle = cv2.circle(self.map_overlay,pt2,3,(255,0,0),-1)
-          cv2.imshow("map_overlay:", self.map_overlay)
-          if self.frame_num >= 119:
+          rotated_robot_rectangle = cv2.circle(self.map_overlay,loc,3,(255,0,0),-1)
+          if self.frame_num >= 130:
+            cv2.imshow("map_overlay", self.map_overlay)
             cv2.waitKey(0)
 
     #################################
@@ -890,8 +923,9 @@ class AnalyzeMap():
         curr_image = cv2.imread(curr_img_pth)
         curr_image_KP = Keypoints(curr_image)
         bird_eye_vw = self.get_birds_eye_view(curr_image)
-        rotated_new_map = self.curr_move
-        self.move_state(action, bird_eye_vw)
+        if self.curr_move is not None:
+          self.prev_move = self.curr_move.copy()
+        self.curr_move = bird_eye_vw
         # show the original and warped images
         # curr_image_KP.drawKeypoints()
         # curr_move_KP.drawKeypoints()
@@ -906,23 +940,22 @@ class AnalyzeMap():
           # add a big border
           self.border_buffer = max(self.curr_move_height,self.curr_move_width)*self.border_multiplier
           print("border buffer:", self.border_buffer)
-          self.map = add_border(self.curr_move, self.border_buffer)
+          self.map = add_border(self.curr_move.copy(), self.border_buffer)
           self.map_overlay = self.map.copy()
           self.map_height,self.map_width = self.map.shape[:2]
 
-          # work with AnalyzeMove to store robot location
+          # initialize location
           self.robot_length = self.cfg.MAP_ROBOT_H_POSE
-          self.robot_location = [(self.border_buffer+self.robot_length + self.curr_move_height), (self.border_buffer + self.curr_move_width/2)]
-          self.robot_location_no_border = [(self.robot_length + self.curr_move_height), (self.curr_move_width/2)]
+          self.robot_origin = [int(self.border_buffer+self.robot_length + self.curr_move_height), int(self.border_buffer + self.curr_move_width/2)]
+          self.robot_location_from_origin = [0,0]
+          self.robot_location = self.robot_origin
+          self.robot_orientation = 0  # starting point in radians
           print("robot_location:",self.robot_location, self.map_height, self.map_width, self.border_buffer, self.robot_length)
+          print("inital orientation: ", self.robot_orientation)
+          self.add_robot_to_overlay()
 
           self.VIRTUAL_MAP_SIZE = self.border_buffer * 1 + self.map_height
           self.map_virtual_map_center = self.VIRTUAL_MAP_SIZE / 2
-
-          self.robot_orientation = 0  # starting point in radians
-          print("orientation: ", self.robot_orientation)
-
-          self.add_robot_to_overlay()
           return 
         else:
           ###########################
@@ -934,18 +967,51 @@ class AnalyzeMap():
           # realtime control after the analysis.
           ###########################
           if action in ["LEFT","RIGHT"]:
-            self.find_best_rotation(action, self.prev_move,
-                            self.curr_move, frame_num=frame_num)
+            best_angle = self.find_best_rotation(action, self.prev_move,
+                            self.curr_move, frame_num)
+            print("Final Best Angle: ", best_angle)
           elif action in ["FORWARD","REVERSE"]:
-            self.analyze_fwd_rev(action, self.prev_move,
-                            self.curr_move, frame_num=frame_num)
+            best_move = self.analyze_fwd_rev(action, self.prev_move,
+                            self.curr_move, frame_num)
+            print("Final Best Move: ", best_move)  # in pixels
 
-          # self.map has been computed.
-          # make overlay map and add robot in current position.
+          ###########################
+          # Global Location and Orientation
+          #
+          # compute self.map.
+          # make copy for overlay map and add robot in current position.
           # in future, can add position of each move leading to this point
+          ###########################
+          if action in ["LEFT", "RIGHT"]:
+            self.robot_orientation = rad_sum(self.robot_orientation, best_angle)
+            print("Robot Orientation:", self.robot_orientation)
+          elif action in ["FORWARD", "REVERSE"]:
+            # In local map, the robot moves straight up but
+            # In global map, the robot orientation factors into robot location
+            angle = self.robot_orientation
+            pix_h = round(best_move * math.cos(angle))
+            pix_w = round(best_move * math.sin(angle))
+            self.robot_location[0] += int(round(pix_h))
+            self.robot_location[1] += int(round(pix_w))
+            self.robot_location_from_origin[0] += int(round(pix_h))
+            self.robot_location_from_origin[1] += int(round(pix_w))
 
-          pt2 = [int(self.robot_location[1]), int(self.robot_location[0])]
+            print("Robot Location (incl border):", self.robot_location)
+            print("Robot Location (from origin):", self.robot_location_from_origin)
+
+          ###########################
+          # Global Mapping
+          ###########################
+          # rotate about the robot (local positioning, global orientation)
+          rotated_new_map = add_border(self.curr_move.copy(), self.border_buffer)
+          # move frame to global robot location
+          rotated_new_map = replace_border(rotated_new_map, int(rotated_new_map.shape[0]), int(rotated_new_map.shape[1]), self.robot_location_from_origin[0], self.robot_location_from_origin[1])
+
+          # rotate frame to global robot orientation
+          rotated_new_map = rotate_about_robot(rotated_new_map, self.robot_orientation, self.robot_location)
+
+          self.map = self.merge_maps(self.map, rotated_new_map)
           self.map_overlay = self.map.copy()
           self.add_robot_to_overlay()
-          return
+          return 
 

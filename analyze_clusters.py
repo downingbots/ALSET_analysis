@@ -67,6 +67,8 @@ class AnalyzeClusters():
       # of the image, and then use the LBP representation
       # to build the histogram of patterns
       # lbp = feature.local_binary_pattern(image, self.n_points,
+
+      # ARD: image lighting should already be normalized
       lbp = local_binary_pattern(image, self.n_points, self.radius, method="uniform")
       (hist, _) = np.histogram(lbp.ravel(),
           bins=np.arange(0, self.n_points + 3),

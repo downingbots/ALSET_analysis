@@ -14,6 +14,7 @@ class CVAnalysisTools():
       # foreground/background for movement detection
       self.background = None
       self.foreground = None
+      self.unmoved_pix = None
       self.INFINITE = 1000000000000000000
       self.BLACK = [0,0,0]
       self.prev_foreground = None
@@ -23,19 +24,23 @@ class CVAnalysisTools():
       self.radius = None
       self.TEXTURE_METHOD = 'uniform'
       self.textures = {}
+      self.MeanLight = 0
+      self.MeanLightCnt = 0
 
   ###############################################
   # should remove from automated func
-  def optflow(self, old_frame_path, new_frame_path, add_edges=False):
+  def optflow(self, old_frame_path, new_frame_path, add_edges=False, thresh=None):
       if old_frame_path is None:
         print("optflow: old_frame None")
         return True
-      old_frame = cv2.imread(old_frame_path)
-      new_frame = cv2.imread(new_frame_path)
-      opt_flow_results = self.optflow_pts(old_frame, new_frame, add_edges)
+      # old_frame = cv2.imread(old_frame_path)
+      # new_frame = cv2.imread(new_frame_path)
+      old_frame,mean_diff = self.adjust_light(old_frame_path)
+      new_frame,mean_diff = self.adjust_light(new_frame_path)
+      opt_flow_results = self.optflow_pts(old_frame, new_frame, add_edges, thresh)
       return opt_flow_results["result"]
 
-  def optflow_pts(self, old_frame, new_frame, add_edges=False):
+  def optflow_pts(self, old_frame, new_frame, add_edges=False, thresh=None):
       # cap = cv2.VideoCapture('slow.flv')
       # params for ShiTomasi corner detection
       optflow_results = {}
@@ -104,7 +109,9 @@ class CVAnalysisTools():
       # note: PPF also used to ensure that moving
       # tried 0.75, 0.9, 1
       # OPTFLOWTHRESH = 0.8
-      if dist > self.cfg.OPTFLOWTHRESH:
+      if thresh is None:
+        thresh = self.cfg.OPTFLOWTHRESH
+      if dist > thresh:
         optflow_results["result"] = True
         optflow_results["prevpts"] = go_pts
         optflow_results["currpts"] = gn_pts
@@ -172,8 +179,10 @@ class CVAnalysisTools():
       return self.foreground
 
   def moved_pixels(self, prev_img_path, curr_img_path, init=False, add_edges=False):
-      prev_img = cv2.imread(prev_img_path)
-      curr_img = cv2.imread(curr_img_path)
+      # prev_img = cv2.imread(prev_img_path)
+      # curr_img = cv2.imread(curr_img_path)
+      curr_img,mean_diff = self.adjust_light(curr_img_path)
+      prev_img,mean_diff = self.adjust_light(prev_img_path)
       if add_edges:
         prev_img = cv2.Canny(prev_img, 50, 200, None, 3)
         curr_img = cv2.Canny(curr_img, 50, 200, None, 3)
@@ -190,21 +199,153 @@ class CVAnalysisTools():
       # cv2.waitKey(0)
       return self.foreground
 
-  def unmoved_pixels(self, prev_img_path, curr_img_path, init=False):
-      prev_img = cv2.imread(prev_img_path)
-      curr_img = cv2.imread(curr_img_path)
-      # thresh = 10
-      thresh = 20
-      prev_img = cv2.GaussianBlur(prev_img, (5, 5), 0)
-      self.background = cv2.cvtColor(prev_img, cv2.COLOR_BGR2GRAY)
-      curr_img = cv2.GaussianBlur(curr_img, (5, 5), 0)
-      gray_curr_img = cv2.cvtColor(curr_img, cv2.COLOR_BGR2GRAY)
-      diff = cv2.absdiff(gray_curr_img, self.background)
-      self.foreground = cv2.threshold(diff, thresh, 255, cv2.THRESH_BINARY)[1]
-      cv2.imshow("Gripper FG", self.foreground)
-      cv2.imshow("Gripper IM", gray_curr_img)
+  def get_gripper_bounding_box(self, unmoved_pix, image):
+      ret, contour_thresh = cv2.threshold(unmoved_pix.copy(), 125, 255, 0)
+      contour_thresh = cv2.dilate(contour_thresh,None,iterations = 10)
+
+      contours, hierarchy = cv2.findContours(contour_thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+      # print("hierarchy:", hierarchy)
+
+      # cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
+      #   cv2.CHAIN_APPROX_SIMPLE)
+
+      # for accuracy in range(10):
+      #   accuracy_factor = .1 * (accuracy+1)
+      # accuracy_factor = .01
+      accuracy_factor = .1
+      x,y,ch = image.shape
+      max_left_gripper_bounding_box = [[[0, int(y*.4)]], [[0, y-1]],      
+                        [[ int(x/2), y-1 ]], [[ int(x/2), int(y*.4)]]]
+      max_right_gripper_bounding_box =[[[int(x/2),int(y*.4)]],[[x-1,int(y*.4)]],
+                                       [[x-1, y-1]], [[int(x/2), y-1]]]
+      left_bb = max_left_gripper_bounding_box
+      right_bb = max_right_gripper_bounding_box
+      left_found, right_found = False, False
+      for c in contours:
+        if len(contours) > 1:
+          area = cv2.contourArea(c)
+          if area < 16:
+            continue
+          # Calculate accuracy as a percent of the contour perimeter
+          accuracy = accuracy_factor * cv2.arcLength(c, True)
+          approx = cv2.approxPolyDP(c, accuracy, True)
+          if len(approx) < 2:
+            continue
+          if check_gripper_bounding_box(max_left_gripper_bounding_box, approx):
+            print("Found Left Gripper Bounding Box")
+            if len(approx) == 2:
+              maxx = max(approx[0][0][0], approx[1][0][0])
+              minx = min(approx[0][0][0], approx[1][0][0])
+              maxy = max(approx[0][0][1], approx[1][0][1])
+              miny = min(approx[0][0][1], approx[1][0][1])
+              print("0maxy, miny, maxx, minx:", maxy, miny, maxx, minx)
+            else:
+              maxx, minx, maxy, miny = get_min_max_borders(approx)
+              print("1maxx, minx, maxy, miny:", maxx, minx, maxy, miny)
+            if left_found:  
+              # gripper is represented by multiple polygons
+              maxx = max(maxx, left_bb[2][0][0])
+              miny = min(miny, left_bb[0][0][1])
+            left_bb = [[[0, miny]],[[0, y-1]],
+                       [[maxx, y-1]], [[maxx, miny]]]
+            left_found = True
+            print("approx:", approx)
+            print("l_bb:", left_bb)
+          elif check_gripper_bounding_box(max_right_gripper_bounding_box,approx):
+            print("Found Right Gripper Bounding Box")
+            if len(approx) == 2:
+              maxx = max(approx[0][0][0], approx[1][0][0])
+              minx = min(approx[0][0][0], approx[1][0][0])
+              maxy = max(approx[0][0][1], approx[1][0][1])
+              miny = min(approx[0][0][1], approx[1][0][1])
+              print("2maxy, miny, maxx, minx:", maxy, miny, maxx, minx)
+            else:
+              maxx, minx, maxy, miny = get_min_max_borders(approx)
+            print("3maxx, minx, maxy, miny:", maxx, minx, maxy, miny)
+            if right_found:  
+              # gripper is represented by multiple polygons
+              minx = min(minx, right_bb[0][0][0])
+              miny = min(miny, right_bb[0][0][1])
+            right_bb = [[[minx, miny]],[[x-1, miny]],
+                        [[x-1, y-1]],[[minx, y-1]]]
+            print("approx:", approx)
+            print("r_bb:", right_bb)
+            right_found = True
+      # confirm symmetrical gripper
+      if left_found and right_found:
+        lminy = left_bb[0][0][1]
+        lmaxx = left_bb[2][0][0]
+        rminx = right_bb[0][0][0]
+        rminy = right_bb[0][0][1]
+
+        miny = min(lminy, rminy)
+        if lmaxx < x - rminx - 1:
+          lmaxx = x - rminx - 1
+        else:
+          rminx = x - lmaxx - 1
+
+        left_bb = [[[0, miny]],[[0, y-1]], [[lmaxx, y-1]], [[lmaxx, miny]]]
+        right_bb = [[[rminx, miny]],[[x-1, miny]],[[x-1, y-1]],[[rminx, y-1]]]
+      l_bb = np.int0(left_bb)
+      r_bb = np.int0(right_bb)
+      print("l_bb, r_bb", left_bb, right_bb)
+
+      image = cv2.drawContours(image.copy(), [l_bb], 0, (0, 255, 0), 2)
+      image = cv2.drawContours(image, [r_bb], 0, (0, 255, 0), 2)
+      return left_bb, right_bb, image
+
+  def unmoved_pixels(self, prev_img_path, curr_img_path, init=False, init_pix=None):
+      try:
+        # prev_img = cv2.imread(prev_img_path)
+        # curr_img = cv2.imread(curr_img_path)
+        curr_img,mean_diff = self.adjust_light(curr_img_path)
+        prev_img,mean_diff = self.adjust_light(prev_img_path)
+      except:
+        prev_img = prev_img_path.copy()
+        curr_img = curr_img_path.copy()
+      gray = cv2.cvtColor(curr_img.copy(), cv2.COLOR_BGR2GRAY)
+      edges = cv2.Canny(gray, 50, 200, None, 3)
+      prev_gray = cv2.cvtColor(prev_img.copy(), cv2.COLOR_BGR2GRAY)
+      prev_edges = cv2.Canny(prev_gray, 50, 200, None, 3)
+      if init and init_pix is not None:
+        self.unmoved_pix = init_pix
+      if init and self.unmoved_pix is None:
+        self.unmoved_pix = prev_edges
+        # self.unmoved_pix = edges
+      if True:
+        # print("unmoved pix:", self.unmoved_pix)
+        # cv2.imshow("unmoved pix", self.unmoved_pix)
+        # cv2.imshow("edges", edges)
+        cv2.waitKey(0)
+        diff = cv2.absdiff(self.unmoved_pix, edges)
+        prev_diff = cv2.absdiff(prev_edges, edges)
+        for h in range(prev_img.shape[0]):
+          for w in range(prev_img.shape[1]):
+            if int(diff[h][w]) > 30 and self.unmoved_pix[h][w] > 50:
+              # edge is 0 or 255
+              # diff can result in increase or decrease depending on edge
+              self.unmoved_pix[h][w] = int(.5*self.unmoved_pix[h][w] + .5*edges[h][w])
+              # print("edge, dif, prevdif:", edges[h][w], diff[h][w], prev_diff[h][w])
+            elif int(diff[h][w]) > 30 and prev_diff[h][w] > 30:
+              self.unmoved_pix[h][w] = int(.9*self.unmoved_pix[h][w] + .1*edges[h][w])
+              # self.unmoved_pix[h][w] = int(.75*self.unmoved_pix[h][w] + .25*edges[h][w])
+#            elif (int(diff[h][w]) > 30):
+#              for i in range(-1,2):
+#                for j in range(-1,2):
+#                  x = min(max(0,h+i), prev_img.shape[0]-1)
+#                  y = min(max(0,w+i), prev_img.shape[1]-1)
+#                  if self.unmoved_pix[x][y] > 50:
+#                    self.unmoved_pix[x][y] = int(.9*self.unmoved_pix[x][y] + .1*edges[h][w])
+
+      # contours, image = self.unmoved_pixel_contours(self.unmoved_pix, curr_img.copy())
+      left_bb, right_bb, image = self.get_gripper_bounding_box(self.unmoved_pix, curr_img.copy())
+      # cv2.imshow("bounding box:", image)
+      # cv2.imshow("unmoved_pix2", self.unmoved_pix)
+      # cv2.imshow("Gripper CI", curr_img)
       cv2.waitKey(0)
-      return self.foreground
+
+      left_bb, right_bb, image = self.get_gripper_bounding_box(self.unmoved_pix, curr_img.copy())
+      return self.unmoved_pix.copy(), left_bb, right_bb
 
   ###############################################
   # Color histogram for texture mapping (e.g., roads, floor)
@@ -461,3 +602,33 @@ class CVAnalysisTools():
           cv2.drawContours(img, [c], -1, def_clr, 2)
           # cv2.putText(img, itext, (cX, cY),
           #       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+
+  ###################
+  # Light Adjustment
+  ###################
+  def adjust_light(self, frame_path, add_to_mean=False):
+      img = cv2.imread(frame_path)
+      font = cv2.FONT_HERSHEY_SIMPLEX
+      hsv  = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2HSV)
+      h, s, v = cv2.split(hsv)
+      mean_v = cv2.mean(v)[0]
+      if add_to_mean:
+        self.MeanLight = (self.MeanLightCnt*self.MeanLight + mean_v)/(self.MeanLightCnt+1)
+        self.MeanLightCnt += 1
+      adjusted_img  = img
+      mean_dif = 0
+      if self.MeanLightCnt > 10:
+        mean_dif = int(abs(np.round(self.MeanLight - mean_v)))
+        print("big change in lighting.  mean_dif:", mean_dif, self.MeanLight)
+        if abs(mean_dif) > .06 * abs(self.MeanLight):
+          lim = 255 - mean_dif
+          v[v > lim] = 255
+          v[v <= lim] += mean_dif
+
+          final_hsv = cv2.merge((h, s, v))
+          adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
+          cv2.imshow("Orig Image", img)
+          cv2.imshow("Light Adjusted Image", adjusted_img)
+          cv2.waitKey(0)
+      return adjusted_img, mean_dif
+

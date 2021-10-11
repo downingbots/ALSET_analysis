@@ -31,8 +31,8 @@ def replace_border(img, desired_height, desired_width, offset_height, offset_wid
     extract_img_rect = img[minh:maxh, minw:maxw]
     # extract_img_rect = img[minw:maxw, minh:maxh]
     extract_height, extract_width = extract_img_rect.shape[:2]
-    insert_height = extract_height + 2*abs(offset_height)
-    insert_width  = extract_width + 2*abs(offset_width)
+    insert_height = int(extract_height + 2*abs(offset_height))
+    insert_width  = int(extract_width + 2*abs(offset_width))
     insert_img_rect = np.zeros((insert_height,insert_width,3),dtype="uint8")
     for eh in range(extract_height):
       for ew in range(extract_width):
@@ -59,6 +59,14 @@ def replace_border(img, desired_height, desired_width, offset_height, offset_wid
 def radians_to_degrees(rad):
     return  rad * (180/np.pi)
 
+# height/width to x/y coordinates (for using image vs. math APIs)
+def hw_to_xy(A):
+    return [A[1],A[0]]
+
+# x/y to height/width coordinates (for using image vs. math APIs)
+def xy_to_hw(A):
+    return [A[1],A[0]]
+
 # angle = int(math.atan((y1-y2)/(x2-x1))*180/math.pi)
 # image is "new map" == the transformed "curr move" with border
 # center is about 4xfinger pads -> robot_location
@@ -68,11 +76,12 @@ def rotate_about_robot(image, angle, robot_location):
  
     # getRotationMatrix2D angle is in degrees!
     
-    M = cv2.getRotationMatrix2D(robot_location, radians_to_degrees(angle), 1)
+    rbt_loc = [robot_location[1], robot_location[0]]
+    M = cv2.getRotationMatrix2D(rbt_loc, radians_to_degrees(angle), 1)
     print("angle,M:", angle, M, robot_location, image.shape)
     out = cv2.warpAffine(image, M, (image.shape[0], image.shape[1]))
 
-    pt = [[int(robot_location[1]), int(robot_location[0])], [int(image.shape[1]/2), int(image.shape[0]/2)]] # [w,h]
+    pt = [[int(robot_location[0]), int(robot_location[1])], [int(image.shape[1]/2), int(image.shape[0]/2)]] # [w,h]
     pt = np.float32(pt).reshape(-1,1,2)
     # ln2 = cv2.perspectiveTransform(pt,M)
     # print("3 robot loc pt", pt2[0][0])
@@ -89,6 +98,7 @@ def real_map_border(mapimg, ret_outside=True):
     # convert the stitched image to grayscale and threshold it
     # such that all pixels greater than zero are set to 255
     # (foreground) while all others remain 0 (background)
+    shape, approximations = None, None
     try:
       gray = cv2.cvtColor(mapimg, cv2.COLOR_BGR2GRAY)
       thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)[1]
@@ -141,6 +151,7 @@ def real_map_border(mapimg, ret_outside=True):
         # print("contour:", count)
         # print("approx contour:", approximations)
         return shape, approximations
+      return shape, approximations
 
 def get_min_max_borders(border):
     b = []
@@ -489,8 +500,7 @@ def image_in_border(border, image):
     # cv2.waitKey(0)
     return final_image
 
-def point_in_border(border, pt):
-    bufzone = 10
+def point_in_border(border, pt, bufzone=10):
     # Create Point objects
     poly = border_to_polygon(border, bufzone)
     Pt = Point(pt)
@@ -501,8 +511,7 @@ def point_in_border(border, pt):
       # print("pt not within", Pt)
       return False
 
-def line_in_border(border,pt0,pt1):
-    bufzone = 10
+def line_in_border(border,pt0,pt1, bufzone=10):
     poly = border_to_polygon(border, bufzone)
     line_a = LineString([pt0,pt1])
     # print("line_in_border:", line_a.centroid, border)
@@ -511,3 +520,17 @@ def line_in_border(border,pt0,pt1):
     else:
       return False
 
+def check_gripper_bounding_box(max_bb, test_bb):
+    if len(test_bb) == 2:
+      print("test_bb:", test_bb)
+      if point_in_border(max_bb, test_bb[0][0], 0):
+        if point_in_border(max_bb, test_bb[1][0], 0):
+          return True
+      return False
+    elif len(test_bb) == 1:
+      return point_in_border(max_bb, test_bb[0][0], 0)
+    max_bb_p = border_to_polygon(max_bb)
+    test_bb_p = border_to_polygon(test_bb)
+    if test_bb_p.within(max_bb_p):
+      return True
+    return False

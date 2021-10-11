@@ -1,5 +1,6 @@
 import cv2
 from cv_analysis_tools import *
+from analyze_color import *
 
 class AnalyzeGripper():
 
@@ -10,13 +11,18 @@ class AnalyzeGripper():
       self.prev_action = ""
       self.background = None
       self.threshold = 10
-      self.gripper_img = None
       self.gripper_history = []
       self.gripper_open_cnt = 0
       self.gripper_close_cnt = 0
       self.gripper_state = "UNKNOWN"
+      self.gripper_state_values = None
+      self.gripper_closed_image = 0
+      self.gripper_open_image = 0
+      self.fully_open_cnt = None
+      self.fully_closed_cnt = None
       self.add_edges = False   # didn't seem to add much, if anything
       self.cvu = CVAnalysisTools()
+      self.cfg = Config()
 
   def detect_robot_body(self, image_path):
       # store non-gripper image fragments of the robot body
@@ -28,22 +34,46 @@ class AnalyzeGripper():
       # with other classes that collect images of interest.
       # todo
       pass
+      # compare with closed gripper image
+
+  def mask_gripped_object(self, img):
+      pass
+
+  def digital_servo(self, img, target, direction):
+      if direction not in ["ABOVE", "ANY", "HORIZONTAL"]:
+        pass
+      if known_cluster(target):
+        pass
+
+  def detect_digital_servo(self):
+      pass
+      # arm movement centered around or above an object
+      # aimed target -> learn the target, associate with the cluster
 
   # bound the images based upon movement
   # then get gripper contours from the area of movement
   def gripper_edges(self, image_path):
-      image = cv2.imread(image_path)
+      try:
+        image = cv2.imread(image_path)
+      except:
+        image = image_path
       gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+      gray = image
       # Threshold the image
       ret, thresh = cv2.threshold(gray, 20, 255, 0)
       edges = cv2.Canny(gray, 50, 200, None, 3)
-      cv2.imshow("gripper_edges", edges)
-      cv2.waitKey(0)
 
   # then get gripper contours from the area of movement
   def gripper_contours(self, image_path):
-      image = cv2.imread(image_path)
-      gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+      try:
+        # image = cv2.imread(image_path)
+        image,mean_diff = self.adjust_light(image_path)
+      except:
+        image = image_path
+      try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+      except:
+        gray = image
       # Threshold the image
       ret, thresh = cv2.threshold(gray, 20, 255, 0)
       # Find contours 
@@ -53,11 +83,64 @@ class AnalyzeGripper():
       # Iterate through each contour and compute the approx contour
       for c in contours:
           # Calculate accuracy as a percent of the contour perimeter
-          accuracy = 0.03 * cv2.arcLength(c, True)
+          accuracy = 0.1 * cv2.arcLength(c, True)
           approx = cv2.approxPolyDP(c, accuracy, True)
-          # cv2.drawContours(image, [approx], 0, (0, 255, 0), 2)
-      # cv2.imshow("gripper_contours", image)
+          cv2.drawContours(image, [approx], 0, (0, 255, 0), 2)
+      cv2.imshow("gripper_contours", image)
       # cv2.waitKey(0)
+
+  def save_gripper_pos_info(self):
+      # TODO
+      pass
+
+  def get_gripper_pos_info(self):
+      if self.gripper_state == "UNKNOWN":
+        return None
+      if self.gripper_state_values is None:
+        self.gripper_state_values = []
+      while len(self.gripper_state_values) <= self.gripper_close_cnt:
+        self.gripper_state_values.append([])
+      while len(self.gripper_state_values[self.gripper_close_cnt]) <= self.gripper_open_cnt:
+        self.gripper_state_values[self.gripper_close_cnt].append({})
+      return self.gripper_state_values[self.gripper_close_cnt][self.gripper_open_cnt]
+
+  def set_gripper_pos_info(self, key, value):
+      if self.gripper_state == "UNKNOWN":
+        print("set_gripper_pos_info called in UNKNOWN state")
+        return 
+      g_pos_info = self.get_gripper_pos_info()
+      # print("g_pos_info:", g_pos_info)
+      print("g_pos_info: close/open cnts", self.gripper_close_cnt,self.gripper_open_cnt)
+      self.gripper_state_values[self.gripper_close_cnt][self.gripper_open_cnt][key] = value
+
+  def get_safe_ground(self, lg_bb, rg_bb, image):
+      # only call if action is forward. Return image between gripper bbs.
+      # typically arm should be parked.
+      # left_bb = [[[0, miny]],[[0, y-1]], [[lmaxx, y-1]], [[lmaxx, miny]]]
+      # right_bb = [[[rminx, miny]],[[x-1, miny]],[[x-1, y-1]],[[rminx, y-1]]]
+  
+      sg_minx = lg_bb[2][0][0]+1
+      sg_maxx = rg_bb[0][0][0]-1 
+      sg_miny = max(lg_bb[0][0][1], rg_bb[0][0][1])
+      sg_maxy = lg_bb[1][0][1]
+      if sg_maxx - sg_minx < 50 or sg_maxy - sg_miny < 50:
+        return [None, None, None]
+    
+      safe_ground_bb = [[[sg_minx, sg_miny]],[[sg_minx, sg_maxy]], [[sg_maxx, sg_maxy]], [[sg_maxx, sg_miny]]]
+ 
+      safe_ground_img = np.zeros((sg_maxx-sg_minx, sg_maxy-sg_miny, 3), dtype="uint8")
+      safe_ground_img[0:sg_maxx-sg_minx, 0:sg_maxy-sg_miny] = image[sg_minx:sg_maxx, sg_miny:sg_maxy]
+      gray_sg_img = cv2.cvtColor(safe_ground_img, cv2.COLOR_BGR2GRAY)
+
+      cv2.imshow("Safe Ground", safe_ground_img)
+      radius = min(sg_maxx-sg_minx, sg_maxy-sg_miny)
+      num_radius = max(int((radius-1) / 6), 2)
+      safe_ground_lbp = []
+      for rad in range(1,(radius-1), num_radius):
+        safe_ground_lbp.append(LocalBinaryPattern(gray_sg_img, rad))
+      # ARD: TODO: move lbp results to cluster analysis
+      #            make a lbp catalog of safe ground
+      return [safe_ground_bb, safe_ground_img, safe_ground_lbp]
 
   def analyze(self, frame_num, action, prev_img_path, curr_img_path, done=False):
       save = False 
@@ -65,48 +148,183 @@ class AnalyzeGripper():
         init = True
       else:
         init = False
-      if frame_num == self.prev_frame_num + 1 and action == "GRIPPER_OPEN" and action == self.prev_action:
+      opt_flw = self.cvu.optflow(prev_img_path, curr_img_path, add_edges=self.add_edges, thresh = 0.05) 
+      ##########################
+      # GRIPPER OPEN           #
+      ##########################
+      # if frame_num == self.prev_frame_num + 1 and action == "GRIPPER_OPEN" and action == self.prev_action:
+      if frame_num == self.prev_frame_num + 1 and action == "GRIPPER_OPEN":
         print("1 prev_frame, frame, prev_action, action:", self.prev_frame_num, frame_num, self.prev_action, action)
-        # self.gripper_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
-        if self.cvu.optflow(prev_img_path, curr_img_path, add_edges=self.add_edges):
-          self.gripper_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
-        if done:
-          self.gripper_state = "FULLY_OPEN"
-        elif not self.cvu.optflow(prev_img_path, curr_img_path, add_edges=self.add_edges) and self.gripper_state != "FULLY_CLOSE":
-          self.gripper_state = "FULLY_OPEN"
-        else:
-          # do OPT check if unchanged, then done
-          self.gripper_open_cnt += 1
-          self.gripper_close_cnt = 0
-          self.gripper_state = "PARTIALLY_OPEN"
-        print("gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
-        if frame_num >= self.stop_at_frame:
-          cv2.imshow("Gripper FG", self.gripper_img)
-          cv2.waitKey(0)
-
-      elif frame_num == self.prev_frame_num + 1 and action == "GRIPPER_CLOSE" and action == self.prev_action:
-        print("2 prev_frame, frame, prev_action, action:", self.prev_frame_num, frame_num, self.prev_action, action)
-        if self.cvu.optflow(prev_img_path, curr_img_path, add_edges=self.add_edges):
-          # self.gripper_img = self.cvu.moved_pixels_over_time(prev_img_path, curr_img_path, init)
-          self.gripper_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
-        if done:
-          self.gripper_state = "FULLY_CLOSE"
-        elif not self.cvu.optflow(prev_img_path, curr_img_path) and self.gripper_state != "FULLY_OPEN":
-          self.gripper_state = "FULLY_CLOSE"
-        else:
-          self.gripper_close_cnt += 1
+        self.gripper_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
+        if not opt_flw and (self.gripper_state == "UNKNOWN" or
+                        self.gripper_state == "UNKNOWN_CLOSE"):
+          self.gripper_state = "UNKNOWN_OPEN"
+          self.fully_open_cnt = 0
+          # 0,0 counts shouldn't happen
+          # gripper open_cnt should go down when gripper_close_cnt goes up & vica-versa
           self.gripper_open_cnt = 0
-          self.gripper_state = "PARTIALLY_CLOSE"
-        print("gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
-      else:
-        print("3 prev_frame, frame, prev_action, action:", self.prev_frame_num, frame_num, self.prev_action, action)
-        save = True 
+          self.gripper_close_cnt = 0
+        elif self.gripper_state == "UNKNOWN":
+          pass
+        elif not opt_flw and self.gripper_state == "UNKNOWN_OPEN":
+          self.gripper_state = "FULLY_OPEN"
+          self.fully_open_cnt = self.gripper_open_cnt
+          self.gripper_close_cnt = 0
+        elif self.gripper_state == "UNKNOWN_CLOSE":
+          self.gripper_open_cnt += 1
+          self.gripper_close_cnt = max(self.gripper_close_cnt-1, 0)
+        elif self.gripper_state == "UNKNOWN_OPEN":
+          self.gripper_state = "UNKNOWN"
+          self.gripper_open_cnt += 1
+          self.gripper_close_cnt = max(self.gripper_close_cnt-1, 0)
+        else:
+          g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
+          cv2.imshow("Gripper open", g_img)
+          # cv2.waitKey(0)
+          if g_img is None:
+            print("g_img is None")
+          # ARD: opened up. No longer fully closed...
+          if done:
+            self.gripper_state = "FULLY_OPEN"
+            self.fully_open_cnt = self.gripper_open_cnt
+            self.gripper_close_cnt = 0
+          elif self.gripper_state == "FULLY_OPEN" and self.fully_open_cnt <= self.gripper_open_cnt and self.gripper_close_cnt == 0:
+            pass
+          elif not opt_flw and self.gripper_state != "FULLY_CLOSED" and action == self.prev_action:
+            # want opt_flow to fail 2x in a row
+            self.gripper_state = "FULLY_OPEN"
+            self.fully_open_cnt = self.gripper_open_cnt
+            self.set_gripper_pos_info("FULLY_OPEN_IMG", g_img)
+          else:
+            # do OPT check if unchanged, then done
+            self.gripper_open_cnt += 1
+            self.gripper_close_cnt = max(self.gripper_close_cnt-1, 0)
+            self.gripper_state = "PARTIALLY_OPEN"
+        print("1 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
+        if frame_num >= self.stop_at_frame:
+            cv2.imshow("Gripper FG", g_img)
+            # cv2.waitKey(0)
+      ##########################
+      # GRIPPER CLOSE          #
+      ##########################
+      # elif frame_num == self.prev_frame_num + 1 and action == "GRIPPER_CLOSE" and action == self.prev_action:
+      elif frame_num == self.prev_frame_num + 1 and action == "GRIPPER_CLOSE":
+        print("2 prev_frame, frame, prev_action, action:", self.prev_frame_num, frame_num, self.prev_action, action)
+        if not opt_flw and (self.gripper_state == "UNKNOWN" or
+                            self.gripper_state == "UNKNOWN_OPEN"):
+          self.gripper_state = "UNKNOWN_CLOSED"
+          self.fully_open_cnt = 0
+          # 0,0 counts shouldn't happen
+          # gripper open_cnt should go down when gripper_close_cnt goes up & vica-versa
+          self.gripper_open_cnt = 0
+          self.gripper_close_cnt = 0
+        elif self.gripper_state == "UNKNOWN":
+          pass
+        elif not opt_flw and self.gripper_state == "UNKNOWN_CLOSE":
+          self.gripper_state = "FULLY_CLOSED"
+          self.fully_close_cnt = self.gripper_close_cnt
+          self.gripper_open_cnt = 0
+        elif self.gripper_state == "UNKNOWN_OPEN":
+          self.gripper_open_cnt = max(self.gripper_open_cnt-1, 0)
+          self.gripper_close_cnt += 1
+        elif self.gripper_state == "UNKNOWN_CLOSE":
+          self.gripper_state = "UNKNOWN"
+          self.gripper_open_cnt = max(self.gripper_open_cnt-1, 0)
+          self.gripper_close_cnt += 1
+        else:
+          # g_img = self.cvu.moved_pixels_over_time(prev_img_path, curr_img_path, init)
+          g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
+          # cv2.imshow("moved pix", g_img)
+          # cv2.waitKey(0)
+          if done:
+            self.gripper_state = "FULLY_CLOSED"
+            self.set_gripper_pos_info("FULLY_CLOSED_IMG", g_img)
+            print("FULLY_CLOSED: done")
+            # ARD: should take mean
+            self.fully_close_cnt = self.gripper_close_cnt
+            self.gripper_open_cnt = 0
+          elif self.gripper_state == "FULLY_CLOSED" and self.fully_close_cnt <= self.gripper_close_cnt and self.gripper_open_cnt == 0:
+            pass
+          elif not opt_flw and self.gripper_state != "FULLY_OPEN" and action == self.prev_action:
+            # ARD: check if grabbing a cube
+            # want opt_flow to fail 2x in a row
+            self.set_gripper_pos_info("FULLY_CLOSED_IMG", g_img)
+            self.gripper_state = "FULLY_CLOSED"
+            self.fully_close_cnt = self.gripper_close_cnt
+            self.gripper_open_cnt = 0
+          else:
+            self.gripper_open_cnt = max(self.gripper_open_cnt-1, 0)
+            self.gripper_close_cnt += 1
+            self.gripper_state = "PARTIALLY_CLOSED"
+        print("2 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state, opt_flw, done)
+        #
+        # TODO: store gripper_state with image 
+        #  ../GRIPPER/CxOy_#[...].img
+        #  ../GRIPPER/CxOyCLz_#[...].img    # cluster
+        #
+        # else:
+      ##########################
+      # NON-GRIPPER ACTION     #
+      ##########################
+      elif frame_num == self.prev_frame_num + 1 and not self.gripper_state.startswith("UNKNOWN"):
+          # Non-gripper movement. Robot parts will be part of "unmoved pixels".
+          # if frame_num == self.prev_frame_num + 1 and action in ["LEFT","RIGHT","FORWARD","REVERSE"] and self.gripper_state == "FULLY_OPEN":
+            g_pos_info = self.get_gripper_pos_info()
+            try:
+              g_edges = g_pos_info["EDGES"]
+              g_mean_edges = g_pos_info["MEAN_EDGES"]
+              g_mean_edges_img = g_pos_info["MEAN_EDGES_IMG"]
+              g_edges_cnt = g_pos_info["EDGES_COUNT"]
+            except Exception as e:
+              print("exception g_pos_info:", e)
+              g_edges = None
+              g_mean_edges = None
+              g_mean_edges_img = None
+              g_edges_cnt = 0
+              gripper_bounding_box = None 
+            g_edges,lg_bb,rg_bb = self.cvu.unmoved_pixels(prev_img_path, curr_img_path, True, g_edges)
+            g_edges_cnt += 1
+            if g_edges_cnt > self.cfg.MIN_UNMOVED_PIX_COUNT:
+              if g_mean_edges is None:
+                g_mean_edges = np.zeros(g_edges.shape, dtype="float32")
+              g_mean_edges = (g_edges + (g_edges_cnt - self.cfg.MIN_UNMOVED_PIX_COUNT-1) * g_mean_edges) / (g_edges_cnt - self.cfg.MIN_UNMOVED_PIX_COUNT)
+              max_255 = np.zeros(g_edges.shape, dtype="float32")
+              # max_255 = (255,255,255)
+              max_255 = 255
+              g_mean_edges = np.minimum(max_255, g_mean_edges)
+              g_mean_edges = np.round(g_mean_edges)
+              g_mean_edges_img = np.uint8(g_mean_edges.copy())
+              # curr_img = cv2.imread(curr_img_path)
+              curr_img, mean_dif = self.cvu.adjust_light(curr_img_path)
+              # contours, image = self.cvu.unmoved_pixel_contours(g_mean_edges_img, curr_img)
+              left_gripper_bounding_box, right_gripper_bounding_box, image = self.cvu.get_gripper_bounding_box(g_mean_edges_img, curr_img)
+              if action == "FORWARD":
+                safe_ground_info = self.get_safe_ground(left_gripper_bounding_box, right_gripper_bounding_box, curr_img)
+              cv2.imshow("mean_gripper_edges", g_mean_edges_img)
+              cv2.imshow("mean_contour", image)
+            self.set_gripper_pos_info("MEAN_EDGES", g_mean_edges)
+            self.set_gripper_pos_info("MEAN_EDGES_IMG", g_mean_edges_img)
+            self.set_gripper_pos_info("EDGES", g_edges)
+            self.set_gripper_pos_info("EDGES_COUNT", g_edges_cnt)
+            # ret, thresh = cv2.threshold(g_mean_edges_img, 125, 255, 0)
+
+
+            print("g_edge_cnt:", g_edges_cnt, self.cfg.MIN_UNMOVED_PIX_COUNT)
+            print("5 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
+            # cv2.imshow("gripper_edges", g_edges)
+            cv2.waitKey(0)
+#      else:
+#        print("4 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
+#        print("4 prev_frame, frame, prev_action, action:", self.prev_frame_num, frame_num, self.prev_action, action)
+#        save = True 
         # self.gripper_open_cnt = 0
         # self.gripper_close_cnt = 0
 
       if save or done:
-        self.gripper_history.append([self.prev_frame_num, self.gripper_img, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state])
-        print("gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
+        # todo: store the state in "gri
+        self.save_gripper_pos_info()
+        self.gripper_history.append([self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state])
+        print("6 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
       self.prev_frame_num = frame_num
       self.prev_action = action
       # gripper contour and edges do worse than pixel movements (averaged/overlapped).
@@ -117,3 +335,7 @@ class AnalyzeGripper():
   def check_cube_in_gripper(self, frame_num, action, prev_img_path, curr_img_path, done):
       pass
 
+  def label_gripper(self, frame_num, action, prev_img_path, curr_img_path, done=False):
+
+      ret_val = [[label, bounding_box],[label, bounding_box]]
+      return ret_val

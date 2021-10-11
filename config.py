@@ -543,6 +543,7 @@ class Config():
       m = 3
       self.MAP_ROBOT_H_POSE     = n*p        # offset from bottom of image to middle of robot
       self.MAP_ROBOT_SHAPE      = ((n+m)*robot_w,(n+m)*robot_len) # rectangle (width, length)
+      self.MIN_UNMOVED_PIX_COUNT = 4
       self.VIRTUAL_MAP_SIZE = 10000
       self.ENABLED_ANALYSIS = ["METRICS", "LINES", "KEYPOINTS"]
       self.INFINITE = 1000000000000000000000
@@ -550,6 +551,11 @@ class Config():
       self.MSE_THRESH    = 140
       self.SSIM_THRESH   = 0.5
       self.LBP_THRESH    = 0.05
+      self.GRIPPER_HEIGHT_RATIO =  8 / 32
+      self.GRIPPER_WIDTH_RATIO  = 11 / 32
+      self.BIRDS_EYE_RATIO      = 48 / 32
+
+
 
     ###################
     # FUNCTIONS
