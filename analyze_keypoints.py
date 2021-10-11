@@ -138,12 +138,24 @@ class Keypoints:
           if not found:
             angle_match.append([rads, 0])
           return angle_match
+
+        def move_match_count(move_match, pix_moved, pix_thresh):
+          found = False
+          for i, [m,c] in enumerate(move_match):
+            if pix_moved <= pix_thresh:
+              found = True
+              move_match[i][1] += 1
+          if not found:
+            move_match.append([pix_moved, 0])
+          return move_match
+
         #####
 
         good_matches, bad_matches = self.compare_kp(KP2,include_dist=True)
         KP1_kps = []
         KP2_kps = []
         angle_match = []
+        move_match = []
         if self.border is None:
           border_shape, self.border = real_map_border(self.img)
         # print("num matches: ", len(good_matches))
@@ -174,22 +186,68 @@ class Keypoints:
               continue
             elif (action == "RIGHT" and 
                 (abs(kp1.pt[h] - kp2.pt[h]) > abs(kp1.pt[w] - kp2.pt[w]) or kp1.pt[w] <= kp2.pt[w])):
-              print("Right assert: KP fails")
+              print("Right assert: KP fails", kp1.pt, kp2.pt)
               continue
             if action in ["LEFT", "RIGHT"]:
               rads = rad_isosceles_triangle(kp1.pt, rl, kp2.pt)
               if rads is None:
                 continue
               angle_match = angle_match_count(angle_match, rads, self.cfg.RADIAN_THRESH)
+            if action in ["FORWARD"]:
+              if abs(kp1.pt[w] - kp2.pt[w]) > 2 or kp1.pt[h] <= kp2.pt[h]:
+                print("FWD assert: KP fails", kp1.pt, kp2.pt)
+                continue
+            elif action in ["REVERSE"]:
+              if abs(kp1.pt[w] - kp2.pt[w]) > 2 or kp1.pt[h] >= kp2.pt[h]:
+                print("Rev assert: KP fails", kp1.pt, kp2.pt)
+                continue
+            if action in ["FORWARD","REVERSE"]:
+              pix_moved = abs(kp1.pt[h] - kp2.pt[h])
+              print("Fwd/Rev KP match:", kp1.pt, kp2.pt, pix_moved)
+              move_match = move_match_count(move_match, pix_moved, 2)
 
         if action in ["LEFT", "RIGHT"] and len(angle_match) >= 1:
-          max_a, max_c = self.cfg.INFINITE, -self.cfg.INFINITE
-          for a,c in angle_match:
-            if c > max_c:
-              max_c = c
-              max_a = a
-            print("Angle match:", max_a, max_c, angle_match)
-            return(max_a)
+          # was: return best count; now: return list for mse eval 
+          kp_angle_lst = [a[0] for a in angle_match]
+          print("KP Angle match:", angle_match)
+          return(kp_angle_lst)
+#          max_a, max_c = self.cfg.INFINITE, -self.cfg.INFINITE
+#          kp_angle_lst = []
+#          for a,c in angle_match:
+#            if c >= max_c:
+#              if action in ["LEFT"]:
+#                max_a = a
+#              elif action in ["RIGHT"]:
+#                max_a = -a
+#              if c > max_c:
+#                kp_angle_lst = []
+#              else:
+#                # return ties for further evaluation
+#                kp_angle_lst.append(max_a)
+#              max_c = c
+
+        if action in ["FORWARD", "REVERSE"] and len(move_match) >= 1:
+          kp_move_lst = [mv[0] for mv in move_match]
+          print("KP move match:", kp_move_lst)
+          return(kp_move_lst)
+
+#          max_mv, max_c = self.cfg.INFINITE, -self.cfg.INFINITE
+#          kp_move_lst = []
+#          for mv,c in move_match:
+#            if c >= max_c:
+#              if action in ["LEFT"]:
+#                max_mv = mv
+#              elif action in ["RIGHT"]:
+#                max_mv = -mv
+#              if c > max_c:
+#                kp_move_lst = []
+#              else:
+#                # return ties for further evaluation
+#                kp_move_lst.append(max_mv)
+#              max_c = c
+#          print("move match:", max_mv, max_c, move_match)
+#          return(kp_move_lst)
+
         return None
 
     def compare_homography(self,KP2,include_dist=True):

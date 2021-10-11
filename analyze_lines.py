@@ -2,7 +2,7 @@ from utilradians import *
 from utilborders import *
 from config import *
 from cv_analysis_tools import *
-
+import scipy.stats as stats
 
 ########################
 # Map Line Analysis
@@ -75,7 +75,7 @@ class LineAnalysis():
       def offset_h_match_count(offset_h_match, offset_h):
           found = False
           for i, [h,c] in enumerate(offset_h_match):
-            if offset_h == h:
+            if abs(offset_h - h) <= 1:
               found = True
               offset_h_match[i][1] += 1
           if not found:
@@ -97,18 +97,12 @@ class LineAnalysis():
           return offset_h
 
       def best_offset_h(offset_match):
-          if len(offset_match) == 1:
-            return offset_match[0][1]
+          if len(offset_match) >= 1:
+            offset_h_list = [off[0] for off in offset_match]
+            return offset_match[0][0]
+            # for h1, c1 in offset_match:
           else:
-            full_list = []
-            for i in range(c1+1):
-              full_list.append(h1)
-            z = np.abs(stats.zscore(full_list))
-            cleaned_list = full_list[(z < 3)]  # remove outliers
-            offset_h = round(np.mean(cleaned_list))
-            print(offset_h, len(full_list), len(cleaned_list))
-            return offset_h
-
+            return None
 
       confidence = 1
       radian_thresh = self.cfg.RADIAN_THRESH
@@ -195,22 +189,31 @@ class LineAnalysis():
         if action in ["LEFT", "RIGHT"]:
           # return angle
           if len(angle_match) >= 1:
-            max_a, max_c = self.cfg.INFINITE, - self.cfg.INFINITE
-            for a,c in angle_match:
-              if c > max_c:
-                max_c = c
-                max_a = a
-            print("Angle match:", max_a, max_c, angle_match)
-            return(max_a)
-          elif len(comparison["intersect_rads"]) >= 1:
-            return(comparison["intersect_rads"][0][4]) 
-          elif len(comparison["line_rads"]) >= 1:
-            return(comparison["line_rads"][0][2]) 
+            # Was: do a count; now caller does mse comparison
+            angle_list = [a[0] for a in angle_match]
+            print("Angle match:", angle_match, angle_list)
+            return(angle_list)
+
+            # max_a, max_c = self.cfg.INFINITE, - self.cfg.INFINITE
+            # for a,c in angle_match:
+            #   if c > max_c:
+            #     max_c = c
+            #     max_a = a
+            # print("Angle match:", max_a, max_c, angle_match)
+          # elif len(comparison["intersect_rads"]) >= 1:
+          #   # ntersection_rads included in angle_match
+          #   angle_list = [a[0] for a in angle_match]
+          #   return(comparison["intersect_rads"][0][4]) 
+          # elif len(comparison["line_rads"]) >= 1:
+          #   return(comparison["line_rads"][0][2]) 
           else:
             continue
         elif action in ["FORWARD", "REVERSE"]:
-          offset_h =best_offset_h(offset_match)
-          return round(offset_h)
+          # offset_h = best_offset_h(offset_match)
+          if offset_match is None or len(offset_match) == 0:
+            return None
+          offset_h_list = [off[0] for off in offset_match]
+          return offset_h_list
       return None
 
 
