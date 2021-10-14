@@ -324,9 +324,9 @@ class LineAnalysis():
             and dist_line[2] == best_line[2] and dist_line[3] == best_line[3]):
            same_line = True
        
-        if frame_num == 113:
-          cv2.imshow("bad rotated new map:",imglinesp)
-          cv2.waitKey(0)
+        # if frame_num == 113:
+        #   cv2.imshow("bad rotated new map:",imglinesp)
+        #   cv2.waitKey(0)
         if frame_num >= self.stop_at_frame:
           # pt = [int(self.robot_location[1]), int(self.robot_location[0])] # [w,h]
           # imglinesp = cv2.circle(imglinesp,pt,3,(255,0,0),-1)

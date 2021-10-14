@@ -461,8 +461,9 @@ class Keypoints:
           delta_w = int(delta_w / len(map_pts))
         print("avg kp_offsets hw: ", delta_h, delta_w) 
         if self.frame_num >= self.stop_at_frame:
-          cv2.imshow("Matching KeyPoints", new_map_rot)
-          cv2.waitKey(0)
+          # cv2.imshow("Matching KeyPoints", new_map_rot)
+          # cv2.waitKey(0)
+          pass
         return delta_h, delta_w, map_pts, new_map_rot_pts
 
     ##############
@@ -512,13 +513,15 @@ class Keypoints:
               if frame_num >= self.stop_at_frame:
                   rotated_new_map_disp = rotated_new_map_KP.drawKeypoints()
                   if self.frame_num >= self.stop_at_frame:
-                    cv2.imshow("map kp", rotated_new_map_disp)
+                    # cv2.imshow("map kp", rotated_new_map_disp)
+                    pass
                   rotated_new_map_disp = rotated_new_map.copy()
                   rotated_new_map_disp_KP = Keypoints(rotated_new_map_disp)
                   rotated_new_map_disp = rotated_new_map_disp_KP.drawKeypoints()
                   if self.frame_num >= self.stop_at_frame:
-                    cv2.imshow("best kp, rotated", rotated_new_map_disp)
-                    cv2.waitKey(0)
+                    # cv2.imshow("best kp, rotated", rotated_new_map_disp)
+                    # cv2.waitKey(0)
+                    pass
 
 
     ######################################

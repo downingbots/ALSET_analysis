@@ -1,6 +1,7 @@
 import cv2
 from cv_analysis_tools import *
 from analyze_color import *
+from dataset_utils import *
 
 class AnalyzeGripper():
 
@@ -23,6 +24,7 @@ class AnalyzeGripper():
       self.add_edges = False   # didn't seem to add much, if anything
       self.cvu = CVAnalysisTools()
       self.cfg = Config()
+      self.dsu = None
 
   def detect_robot_body(self, image_path):
       # store non-gripper image fragments of the robot body
@@ -67,7 +69,7 @@ class AnalyzeGripper():
   def gripper_contours(self, image_path):
       try:
         # image = cv2.imread(image_path)
-        image,mean_diff = self.adjust_light(image_path)
+        image,mean_diff, rl_bb = self.adjust_light(image_path)
       except:
         image = image_path
       try:
@@ -86,7 +88,7 @@ class AnalyzeGripper():
           accuracy = 0.1 * cv2.arcLength(c, True)
           approx = cv2.approxPolyDP(c, accuracy, True)
           cv2.drawContours(image, [approx], 0, (0, 255, 0), 2)
-      cv2.imshow("gripper_contours", image)
+      # cv2.imshow("gripper_contours", image)
       # cv2.waitKey(0)
 
   def save_gripper_pos_info(self):
@@ -113,26 +115,70 @@ class AnalyzeGripper():
       print("g_pos_info: close/open cnts", self.gripper_close_cnt,self.gripper_open_cnt)
       self.gripper_state_values[self.gripper_close_cnt][self.gripper_open_cnt][key] = value
 
-  def get_safe_ground(self, lg_bb, rg_bb, image):
+  def get_object_bounding_box(self, lg_bb, rg_bb, img):
+      obj_bounding_box = None
+      return obj_bounding_box 
+
+  def get_obj_name(self, curr_func_name):
+      if curr_func_name.startswith("SEARCH_FOR_"):
+        obj_nm = curr_func_name[len("SEARCH_FOR_"):]
+      elif curr_func_name.startswith("GOTO_") and "_IN_" not in curr_func_name:
+        obj_nm = curr_func_name[len("GOTO_"):]
+      elif curr_func_name.startswith("PICK_UP_"):
+        obj_nm = curr_func_name[len("PICK_UP_"):]
+      elif curr_func_name.startswith("GOTO_") and "_IN_" in curr_func_name:
+        idx = curr_func_name.find("_IN_")
+        obj_nm = curr_func_name[idx + len("_IN_"):]
+      elif curr_func_name.startswith("DROP_") and "_IN_" in curr_func_name:
+        idx = curr_func_name.find("_IN_")
+        obj_nm = curr_func_name[len("DROP_"):idx]
+      return obj_nm
+
+  def get_container_name(self, curr_func_name):
+      if curr_func_name.startswith("SEARCH_FOR_") and "_WITH_" in curr_func_name:
+        idx = curr_func_name.find("_WITH_")
+        container_nm = curr_func_name[len("SEARCH_FOR_"):idx]
+      elif curr_func_name.startswith("GOTO_") and "_WITH_" in curr_func_name:
+        idx = curr_func_name.find("_WITH_")
+        container_nm = curr_func_name[len("GOTO_"):idx]
+      elif curr_func_name.startswith("DROP_") and "_IN_" in curr_func_name:
+        idx = curr_func_name.find("_IN_")
+        container_nm = curr_func_name[idx:]
+      return container_nm
+
+  def get_safe_ground(self, lg_bb, rg_bb, obj_bb, image_path):
       # only call if action is forward. Return image between gripper bbs.
       # typically arm should be parked.
       # left_bb = [[[0, miny]],[[0, y-1]], [[lmaxx, y-1]], [[lmaxx, miny]]]
-      # right_bb = [[[rminx, miny]],[[x-1, miny]],[[x-1, y-1]],[[rminx, y-1]]]
-  
+      # right_bb = [[[minx, miny]],[[x-1, miny]], [[x-1, y-1]],[[minx, y-1]]]
+
+
+#      minK = 3
+#      maxK = 6
+#      for K in range(minK, maxK):
+#        pm_floor_clusters = self.cvu.color_quantification(image, K)
+
+
+      image, mean_dif, rl_bb = self.cvu.adjust_light(image_path)
       sg_minx = lg_bb[2][0][0]+1
       sg_maxx = rg_bb[0][0][0]-1 
       sg_miny = max(lg_bb[0][0][1], rg_bb[0][0][1])
       sg_maxy = lg_bb[1][0][1]
       if sg_maxx - sg_minx < 50 or sg_maxy - sg_miny < 50:
+        print("No Safe Ground:", sg_minx, sg_maxx, sg_miny, sg_maxy)
         return [None, None, None]
     
       safe_ground_bb = [[[sg_minx, sg_miny]],[[sg_minx, sg_maxy]], [[sg_maxx, sg_maxy]], [[sg_maxx, sg_miny]]]
  
-      safe_ground_img = np.zeros((sg_maxx-sg_minx, sg_maxy-sg_miny, 3), dtype="uint8")
-      safe_ground_img[0:sg_maxx-sg_minx, 0:sg_maxy-sg_miny] = image[sg_minx:sg_maxx, sg_miny:sg_maxy]
+      # safe_ground_img = np.zeros((sg_maxx-sg_minx, sg_maxy-sg_miny, 3), dtype="uint8")
+      # safe_ground_img[0:sg_maxx-sg_minx, 0:sg_maxy-sg_miny] = image[sg_minx:sg_maxx, sg_miny:sg_maxy]
+      safe_ground_img = np.zeros((sg_maxy-sg_miny, sg_maxx-sg_minx, 3), dtype="uint8")
+      safe_ground_img[0:sg_maxy-sg_miny, 0:sg_maxx-sg_minx] = image[sg_miny:sg_maxy, sg_minx:sg_maxx]
       gray_sg_img = cv2.cvtColor(safe_ground_img, cv2.COLOR_BGR2GRAY)
 
+      print("Safe Ground BB:", safe_ground_bb)
       cv2.imshow("Safe Ground", safe_ground_img)
+      # cv2.waitKey(0)
       radius = min(sg_maxx-sg_minx, sg_maxy-sg_miny)
       num_radius = max(int((radius-1) / 6), 2)
       safe_ground_lbp = []
@@ -142,7 +188,7 @@ class AnalyzeGripper():
       #            make a lbp catalog of safe ground
       return [safe_ground_bb, safe_ground_img, safe_ground_lbp]
 
-  def analyze(self, frame_num, action, prev_img_path, curr_img_path, done=False):
+  def analyze(self, frame_num, action, prev_img_path, curr_img_path, done=False, curr_func_name=None):
       save = False 
       if self.gripper_open_cnt == 0 and self.gripper_close_cnt == 0:
         init = True
@@ -178,7 +224,8 @@ class AnalyzeGripper():
           self.gripper_open_cnt += 1
           self.gripper_close_cnt = max(self.gripper_close_cnt-1, 0)
         else:
-          g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
+          # g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
+          left_gripper_bounding_box, right_gripper_bounding_box, g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
           cv2.imshow("Gripper open", g_img)
           # cv2.waitKey(0)
           if g_img is None:
@@ -202,8 +249,9 @@ class AnalyzeGripper():
             self.gripper_state = "PARTIALLY_OPEN"
         print("1 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
         if frame_num >= self.stop_at_frame:
-            cv2.imshow("Gripper FG", g_img)
+            # cv2.imshow("Gripper FG", g_img)
             # cv2.waitKey(0)
+            pass
       ##########################
       # GRIPPER CLOSE          #
       ##########################
@@ -233,8 +281,8 @@ class AnalyzeGripper():
           self.gripper_close_cnt += 1
         else:
           # g_img = self.cvu.moved_pixels_over_time(prev_img_path, curr_img_path, init)
-          g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
-          # cv2.imshow("moved pix", g_img)
+          left_gripper_bounding_box, right_gripper_bounding_box, g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
+          cv2.imshow("Gripper close", g_img)
           # cv2.waitKey(0)
           if done:
             self.gripper_state = "FULLY_CLOSED"
@@ -295,13 +343,17 @@ class AnalyzeGripper():
               g_mean_edges = np.round(g_mean_edges)
               g_mean_edges_img = np.uint8(g_mean_edges.copy())
               # curr_img = cv2.imread(curr_img_path)
-              curr_img, mean_dif = self.cvu.adjust_light(curr_img_path)
+              curr_img, mean_dif, rl_bb = self.cvu.adjust_light(curr_img_path)
               # contours, image = self.cvu.unmoved_pixel_contours(g_mean_edges_img, curr_img)
               left_gripper_bounding_box, right_gripper_bounding_box, image = self.cvu.get_gripper_bounding_box(g_mean_edges_img, curr_img)
-              if action == "FORWARD":
-                safe_ground_info = self.get_safe_ground(left_gripper_bounding_box, right_gripper_bounding_box, curr_img)
               cv2.imshow("mean_gripper_edges", g_mean_edges_img)
               cv2.imshow("mean_contour", image)
+            if curr_func_name in ["SEARCH_FOR_CUBE", "GOTO_CUBE", "PICK_UP_CUBE", "GOTO_BOX_WITH_CUBE", "DROP_CUBE_IN_BOX"]:
+                obj_nm = self.get_obj_name(curr_func_name)
+                obj_bounding_box = self.get_object_bounding_box(left_gripper_bounding_box, right_gripper_bounding_box, curr_img)
+            if action == "FORWARD":
+                # prev_img is pre-FORWARD ; curr_img is post-FORWARD 
+                safe_ground_info = self.get_safe_ground(left_gripper_bounding_box, right_gripper_bounding_box, None, prev_img_path)
             self.set_gripper_pos_info("MEAN_EDGES", g_mean_edges)
             self.set_gripper_pos_info("MEAN_EDGES_IMG", g_mean_edges_img)
             self.set_gripper_pos_info("EDGES", g_edges)
@@ -312,7 +364,7 @@ class AnalyzeGripper():
             print("g_edge_cnt:", g_edges_cnt, self.cfg.MIN_UNMOVED_PIX_COUNT)
             print("5 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
             # cv2.imshow("gripper_edges", g_edges)
-            cv2.waitKey(0)
+            # cv2.waitKey(0)
 #      else:
 #        print("4 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
 #        print("4 prev_frame, frame, prev_action, action:", self.prev_frame_num, frame_num, self.prev_action, action)
@@ -330,7 +382,7 @@ class AnalyzeGripper():
       # gripper contour and edges do worse than pixel movements (averaged/overlapped).
       # self.gripper_contours(curr_img_path)
       # self.gripper_edges(curr_img_path)
-         
+      return left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info[0], 
 
   def check_cube_in_gripper(self, frame_num, action, prev_img_path, curr_img_path, done):
       pass

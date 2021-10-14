@@ -4,6 +4,8 @@
 # 
 # PredictionTree is now included below
 # from PredictionTree import *
+
+# Modified for Alset Move prediction
 import pandas as pd
 from tqdm import tqdm
 
@@ -15,19 +17,21 @@ class CPT():
     II = None #Inverted Index dictionary, where key : unique item, value : set of sequences containing this item
     LT = None # A Lookup table dictionary, where key : id of a sequence(row), value: leaf node of a Prediction Tree
 
-    def __init__(self):
+    def __init__(self, k):
         self.alphabet = set()
         self.root = PredictionTree()
+        self.K = k
         self.II = {}
         self.LT = {}
         self.data = []
+        self.move_history = []
 
     def load_files(self,train_file,test_file = None):
         """
         This function reads in the wide csv file of sequences separated by commas and returns a list of list of those
         sequences. The sequences are defined as below.
         seq1 = A,B,C,D
-        seq2  B,C,E
+        seq2 = B,C,E
         Returns: [[A,B,C,D],[B,C,E]]
         """
         data = [] # List of list containing the entire sequence data using which the model will be trained.
@@ -45,19 +49,44 @@ class CPT():
             return data, target
         return data
 
-    def add_next_data_list(self, row):
-       self.data.append(row)
-       return self.data
+    def add_next_move(self, move, done=False):
+        """
+        Called after a new element has been appended to move_history.
+        After the calls, the following sets will registered with the CPT;
+
+        move_history = A,B,C,D,E,F,G,H
+          seq1 = A,B,C,D,E
+          seq2 = B,C,D,E,F
+          seq3 = C,D,E,F,G
+          seq4 = D,E,F,G,H
+        """
+        self.move_history.append(move)
+        if len(self.move_history) < self.K:
+          return
+
+        move_sequence = self.move_history[-self.K:]
+        self.data.append(move_sequence)
+        # print("CPT: move_seq", move_sequence)
+        self.train(move_sequence)
+        if done:
+          # in Alset, this is a run of an app to completion.
+          # The next run can use/continue training the CPT.
+          self.move_history = []
+
 
     # In[3]:
-    def train(self, data):
+    def train(self, row):
         """
         This functions populates the Prediction Tree, Inverted Index and LookUp Table for the algorithm.
         Input: The list of list training data
         Output : Boolean True
         """
         cursornode = self.root
-        for seqid,row in enumerate(data):
+        # for seqid,row in enumerate(data):
+        seqid = len(self.data)
+        # print("CPT: train row:", seqid, row)
+        # for seqid,row in enumerate(data):
+        if True:
             for element in row:
                 # adding to the Prediction Tree
                 if cursornode.hasChild(element)== False:
@@ -81,8 +110,6 @@ class CPT():
 
 
     def score(self, counttable,key, length, target_size, number_of_similar_sequences, number_items_counttable):
-
-
         """
         This function is the main workhorse and calculates the score to be populated against an item. Items are predicted
         using this score.
@@ -90,10 +117,7 @@ class CPT():
         Output: Returns a counttable dictionary which stores the score against items. This counttable is specific for a 
         particular row or a sequence and therefore re-calculated at each prediction.
 
-
         """
-
-
 
         weight_level = 1/number_of_similar_sequences
         weight_distance = 1/number_items_counttable
@@ -106,10 +130,10 @@ class CPT():
             
         return counttable
 
-
-
-    def predict(self,data,target,k, n=1): 
+    def predict_move(self,n=1): 
         """
+        # ARD: Modified for an each-move prediction
+        #
         Here target is the test dataset in the form of list of list,
         k is the number of last oelements that will be used to find similar sequences and,
         n is the number of predictions required.
@@ -118,14 +142,20 @@ class CPT():
 
         Output: max n predictions for each sequence
         """
-        
+
+        if len(self.move_history) < self.K:
+          return []
+
+        each_target = self.move_history[-self.K+1:]
         predictions = []
         
+        # ARD: tqdm provides an progress bar and is not necessary.
         # for each_target in tqdm(target):
-        for each_target in target:
-            each_target = each_target[-k:]
+        #   each_target = each_target[-self.K:]
+        if True:
+            print("each target:", each_target)
             
-            intersection = set(range(0,len(data)))
+            intersection = set(range(0,len(self.data)))
             
             for element in each_target:
                 if self.II.get(element) is None:
@@ -138,7 +168,6 @@ class CPT():
                 currentnode = self.LT.get(element)
                 tmp = []
                 while currentnode.Item is not None:
-                    # print("currentnode.Item:", currentnode.Item)
                     tmp.append(currentnode.Item)
                     currentnode = currentnode.Parent
                 similar_sequences.append(tmp)
@@ -149,22 +178,41 @@ class CPT():
                 
             counttable = {}
 
+            # print("CPT: len similar sequences:", len(similar_sequences))
+            # print("CPT: similar sequences:", similar_sequences)
             for  sequence in similar_sequences:
+                # print("CPT: sequence:", sequence)
                 try:
                     index = next(i for i,v in zip(range(len(sequence)-1, 0, -1), reversed(sequence)) if v == each_target[-1])
-                except:
+                    # index = None
+                    # print("CPT: len seq/rev seq ", len(sequence)-1, reversed(sequence))
+                    # print("CPT: zip ", set(zip(range(len(sequence)-1, 0, -1),reversed(sequence))))
+                    # for i,v in zip(range(len(sequence)-1, 0, -1),reversed(sequence)):
+                    #   if v == each_target[-1]:
+                    #     # index = next(i)
+                    #     index = i-1
+                    #     print("CPT: i,v,ind", i, v, index)
+                    #   else:
+                    #     print("CPT: i,v", i, v)
+                    # if index is None:
+                    #     print("CPT: seq", sequence)
+                    #     print("CPT: zip", set(zip(range(len(sequence)-1, 0, -1),reversed(sequence))))
+                except Exception as e:
                     index = None
+                    # print("CPT: index None:", e)
                 if index is not None:
                     count = 1
                     for element in sequence[index+1:]:
-                        if element in each_target:
-                            continue
+#                        if element in each_target:
+#                            print("CPT: in each_target ", element)
+#                            continue
                             
                         counttable = self.score(counttable,element,len(each_target),len(each_target),len(similar_sequences),count)
                         count+=1
+                        # print("CPT: count ", count)
 
-            if len(counttable) > 0:
-              print("len intersection:", len(intersection), len(similar_sequences), len(counttable))
+            # if len(counttable) > 0:
+            #   print("CPT: len intersection:", len(intersection), len(similar_sequences), len(counttable))
 
             pred = self.get_n_largest(counttable,n)
             if len(pred) > 0:

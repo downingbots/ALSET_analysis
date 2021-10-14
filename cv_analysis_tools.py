@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 import math
-import imutils
+from imutils import *
 from config import *
 from matplotlib import pyplot as plt
 from skimage.feature import local_binary_pattern
@@ -35,8 +35,8 @@ class CVAnalysisTools():
         return True
       # old_frame = cv2.imread(old_frame_path)
       # new_frame = cv2.imread(new_frame_path)
-      old_frame,mean_diff = self.adjust_light(old_frame_path)
-      new_frame,mean_diff = self.adjust_light(new_frame_path)
+      old_frame,mean_diff,rl_bb = self.adjust_light(old_frame_path)
+      new_frame,mean_diff,rl_bb = self.adjust_light(new_frame_path)
       opt_flow_results = self.optflow_pts(old_frame, new_frame, add_edges, thresh)
       return opt_flow_results["result"]
 
@@ -174,15 +174,15 @@ class CVAnalysisTools():
       # cv2.imshow("Gripper prev", prev_img)
       # cv2.imshow("Gripper curr", curr_img)
       # cv2.imshow("Gripper Output", self.foreground)
-      cv2.imshow("Gripper Background", self.background)
-      cv2.waitKey(0)
+      # cv2.imshow("Gripper Background", self.background)
+      # cv2.waitKey(0)
       return self.foreground
 
   def moved_pixels(self, prev_img_path, curr_img_path, init=False, add_edges=False):
       # prev_img = cv2.imread(prev_img_path)
       # curr_img = cv2.imread(curr_img_path)
-      curr_img,mean_diff = self.adjust_light(curr_img_path)
-      prev_img,mean_diff = self.adjust_light(prev_img_path)
+      curr_img,mean_diff,rl_bb = self.adjust_light(curr_img_path)
+      prev_img,mean_diff,rl_bb = self.adjust_light(prev_img_path)
       if add_edges:
         prev_img = cv2.Canny(prev_img, 50, 200, None, 3)
         curr_img = cv2.Canny(curr_img, 50, 200, None, 3)
@@ -197,7 +197,12 @@ class CVAnalysisTools():
       # cv2.imshow("Gripper FG", self.foreground)
       # cv2.imshow("Gripper IM", gray_curr_img)
       # cv2.waitKey(0)
-      return self.foreground
+      # invert mask and combine with original image - this makes the black outer edge white
+      mask_inv = cv2.bitwise_not(self.foreground)
+      moved_pix = cv2.bitwise_or(gray_curr_img, mask_inv)
+      cv2.imshow("moved pix", moved_pix)
+      left_bb, right_bb, moved_pix = self.get_gripper_bounding_box(moved_pix, curr_img)
+      return left_bb, right_bb, moved_pix
 
   def get_gripper_bounding_box(self, unmoved_pix, image):
       ret, contour_thresh = cv2.threshold(unmoved_pix.copy(), 125, 255, 0)
@@ -298,15 +303,19 @@ class CVAnalysisTools():
       try:
         # prev_img = cv2.imread(prev_img_path)
         # curr_img = cv2.imread(curr_img_path)
-        curr_img,mean_diff = self.adjust_light(curr_img_path)
-        prev_img,mean_diff = self.adjust_light(prev_img_path)
+        curr_img,mean_diff,rl_bb = self.adjust_light(curr_img_path)
+        prev_img,mean_diff,rl_bb = self.adjust_light(prev_img_path)
       except:
         prev_img = prev_img_path.copy()
         curr_img = curr_img_path.copy()
       gray = cv2.cvtColor(curr_img.copy(), cv2.COLOR_BGR2GRAY)
       edges = cv2.Canny(gray, 50, 200, None, 3)
+      # ARD: dilation also works, and is possibly better in some situations
+      # edges = cv2.dilate(edges,None,iterations = 10)
       prev_gray = cv2.cvtColor(prev_img.copy(), cv2.COLOR_BGR2GRAY)
       prev_edges = cv2.Canny(prev_gray, 50, 200, None, 3)
+      # ARD: dilation also works, and is possibly better in some situations
+      # prev_edges = cv2.dilate(prev_edges,None,iterations = 10)
       if init and init_pix is not None:
         self.unmoved_pix = init_pix
       if init and self.unmoved_pix is None:
@@ -316,7 +325,7 @@ class CVAnalysisTools():
         # print("unmoved pix:", self.unmoved_pix)
         # cv2.imshow("unmoved pix", self.unmoved_pix)
         # cv2.imshow("edges", edges)
-        cv2.waitKey(0)
+        # cv2.waitKey(0)
         diff = cv2.absdiff(self.unmoved_pix, edges)
         prev_diff = cv2.absdiff(prev_edges, edges)
         for h in range(prev_img.shape[0]):
@@ -342,7 +351,7 @@ class CVAnalysisTools():
       # cv2.imshow("bounding box:", image)
       # cv2.imshow("unmoved_pix2", self.unmoved_pix)
       # cv2.imshow("Gripper CI", curr_img)
-      cv2.waitKey(0)
+      # cv2.waitKey(0)
 
       left_bb, right_bb, image = self.get_gripper_bounding_box(self.unmoved_pix, curr_img.copy())
       return self.unmoved_pix.copy(), left_bb, right_bb
@@ -605,14 +614,19 @@ class CVAnalysisTools():
 
   ###################
   # Light Adjustment
+  # Robot arm has a light.
+  # check for light.
+  # find center of light.
+  # do bi-modal light adjustment if necessary.
   ###################
-  def adjust_light(self, frame_path, add_to_mean=False):
+  def adjust_light(self, frame_path, add_to_mean=False, gripper_state="FULLY_OPEN"):
       img = cv2.imread(frame_path)
       font = cv2.FONT_HERSHEY_SIMPLEX
       hsv  = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2HSV)
       h, s, v = cv2.split(hsv)
       mean_v = cv2.mean(v)[0]
       if add_to_mean:
+        # compute overall mean over time
         self.MeanLight = (self.MeanLightCnt*self.MeanLight + mean_v)/(self.MeanLightCnt+1)
         self.MeanLightCnt += 1
       adjusted_img  = img
@@ -620,7 +634,90 @@ class CVAnalysisTools():
       if self.MeanLightCnt > 10:
         mean_dif = int(abs(np.round(self.MeanLight - mean_v)))
         print("big change in lighting.  mean_dif:", mean_dif, self.MeanLight)
-        if abs(mean_dif) > .06 * abs(self.MeanLight):
+      
+        if abs(mean_dif) > .1 * abs(self.MeanLight):
+          # big light difference. Likely due the robot arm LED.
+          orig = img.copy()
+          gray = cv2.cvtColor(orig, cv2.COLOR_BGR2GRAY)
+          # perform a naive attempt to find the (x, y) coordinates of
+          # the area of the image with the largest intensity value
+          (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(gray)
+          # display the results of the naive attempt
+          # cv2.circle(img, maxLoc, 5, (255, 0, 0), 2)
+          # cv2.imshow("Naive brightest spot", img)
+          # apply a Gaussian blur to the image then find the brightest region
+          diameter = int(img.shape[0] / 2.5)
+          if diameter % 2 != 1:
+            diameter += 1
+          radius = int(diameter/2 + 1)
+
+          gray = cv2.GaussianBlur(gray, (radius, radius), 0)
+          (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(gray)
+          rl_img = orig.copy()
+          cv2.circle(rl_img, maxLoc, radius, (255, 0, 0), 2)
+          # display the results of our newly improved method
+          # cv2.imshow("Robust brightest spot", rl_img)
+          # cv2.waitKey(0)
+
+          # compute mean within region
+          # right shape, wrong values
+          rl_minx = int(np.round(max(0, maxLoc[0] - radius)))
+          rl_maxx = int(np.round(min(rl_img.shape[0],rl_minx + diameter)))
+          print("rlimgshaper, rlmaxx:", rl_img.shape[1],rl_minx + diameter)
+          if gripper_state == "FULLY_CLOSED":
+            # diameter_y = int(diameter/2)
+            diameter_y = (diameter)
+          else:
+            diameter_y = diameter
+          rl_miny = int(np.round(max(0, maxLoc[1] - radius)))
+          rl_maxy = int(np.round(min(rl_img.shape[1],rl_miny + diameter_y)))
+          # if brightest spot is near edge, need to cap diameter_w/diameter_h
+          robot_light_bounding_box = [[[rl_minx, rl_miny]],[[rl_minx, rl_maxy]], [[rl_maxx, rl_maxy]], [[rl_maxx, rl_miny]]]
+          # kindof assumes gripper is open
+          print("robot_light_bounding_box:", robot_light_bounding_box)
+          robot_light_img = np.zeros((rl_maxy-rl_miny, rl_maxx-rl_minx, 3), dtype="uint8")
+          robot_light_img[0:rl_maxy-rl_miny, 0:rl_maxx-rl_minx] = img[rl_miny:rl_maxy, rl_minx:rl_maxx]
+          print("robot_light_img.shape:", robot_light_img.shape)
+          # cv2.imshow("robot light Image", robot_light_img)
+          # cv2.waitKey(0)
+
+          robot_light_hsv  = cv2.cvtColor(robot_light_img.copy(), cv2.COLOR_BGR2HSV)
+          rl_h, rl_s, rl_v = cv2.split(robot_light_hsv)
+          rl_mean_v = cv2.mean(rl_v)[0]
+          rl_mean_dif = int(abs(np.round(self.MeanLight - rl_mean_v)))
+
+          adjusted_rl_v = rl_v.copy()
+          adjusted_rl_v[adjusted_rl_v <= rl_mean_dif] = 0
+          adjusted_rl_v[adjusted_rl_v > rl_mean_dif] -= rl_mean_dif
+
+          # compute mean outside region
+          unlit_mean_v = mean_v * img.shape[0] * img.shape[1] - rl_mean_v * (rl_maxy-rl_miny) * (rl_maxx-rl_minx)
+          # unlit_mean_v /= ((img.shape[1]-(rl_maxx-rl_minx)) * (img.shape[0]-(rl_maxy-rl_miny)))
+          print("areas", img.shape[1]*img.shape[0], (rl_maxx-rl_minx) * (rl_maxy-rl_miny))
+          unlit_mean_v /= ((img.shape[0]*img.shape[1])-(rl_maxy-rl_miny)*(rl_maxx-rl_minx))
+          unlit_mean_v = int(abs(np.round(unlit_mean_v)))
+          unlit_mean_dif = int(abs(np.round(self.MeanLight - unlit_mean_v)))
+          print("MEANV, mean_v, rl_mean_v, unlit_mean_v:",self.MeanLight, mean_v, rl_mean_v, unlit_mean_v)
+          print("rl_mean_dif, unlit_mean_dif:",rl_mean_dif, unlit_mean_dif )
+
+          # adjust mean lights
+          lim = 255 - unlit_mean_dif
+          unlit_v = v.copy()
+          unlit_v[unlit_v > lim] = 255
+          unlit_v[unlit_v <= lim] += unlit_mean_dif
+          # ValueError: could not broadcast input array from shape (54,54) into shape (75,54)
+          print("rl_miny,rl_maxy, (rl_maxy-rl_miny):", rl_miny,rl_maxy, (rl_maxy-rl_miny))
+          # Too discontinuous
+          # unlit_v[rl_miny:rl_maxy, rl_minx:rl_maxx] = adjusted_rl_v[0:(rl_maxy-rl_miny), 0:(rl_maxx-rl_minx)]
+
+          final_hsv = cv2.merge((h, s, unlit_v))
+          adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
+          cv2.imshow("Orig Image", img)
+          cv2.imshow("Light Adjusted Image", adjusted_img)
+          # cv2.waitKey(0)
+          return adjusted_img, mean_dif, robot_light_bounding_box
+
+        elif abs(mean_dif) > .06 * abs(self.MeanLight):
           lim = 255 - mean_dif
           v[v > lim] = 255
           v[v <= lim] += mean_dif
@@ -629,6 +726,6 @@ class CVAnalysisTools():
           adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
           cv2.imshow("Orig Image", img)
           cv2.imshow("Light Adjusted Image", adjusted_img)
-          cv2.waitKey(0)
-      return adjusted_img, mean_dif
+          # cv2.waitKey(0)
+      return adjusted_img, mean_dif, None
 

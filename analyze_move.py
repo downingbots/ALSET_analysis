@@ -4,7 +4,7 @@ from config import *
 class AnalyzeMove():
   def __init__(self):
       # CPT-based move prediction
-      self.model = CPT()
+      self.model = CPT(5)
       self.data = None
       self.target = None
 
@@ -62,15 +62,12 @@ class AnalyzeMove():
   def get_expected_movement(self, action):
       return self.move_dist[action]
 
-  def train_predictions(self,move):
-      self.data = self.model.add_next_data_list([move])
+  def train_predictions(self,move, done=False):
+      self.model.add_next_move(move, done)
+      # self.data = self.model.add_next_data_list(move)
 
   def predict(self):
-      if self.data is None:
-        return None
-      print("len data:", len(self.data))
-      self.model.train(self.data)
-      prediction = self.model.predict(self.data,self.data,3,1)
+      prediction = self.model.predict_move()
       return prediction
 
   def estimated_battery_level(self):
@@ -109,11 +106,11 @@ class AnalyzeMove():
 
   # use left/right views of map/new_map or of prev/curr_move image
   # computed and returned by map analysis
-  def analyze_move(self, action, movement):
+  def analyze_move(self, action, movement, done=False):
       self.app_move_num += 1
       self.move_history.append(action, movement)
       self.update_robot_location(action, movement)
-      self.train_predictions(action)
+      self.train_predictions(action, done)
       self.add_delta_from_known_state(action)
 
   # Gripper Analysis also tracks robot movement and objects

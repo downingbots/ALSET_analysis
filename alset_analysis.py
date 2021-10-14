@@ -241,17 +241,17 @@ class DSAnalysis():
 
   def dispatch(self, frame_num, action, prev_img, curr_img, done=False):
       print("curr_func_name: ", self.func_app.curr_func_name)
-      print("predicted, actual:", self.move_analysis.predict(), action)
+      print("CPT: predicted, actual:", self.move_analysis.predict(), action)
       gc.collect()
       self.move_analysis.train_predictions(action)
       # add_to_mean should only be True in dispatch()
-      self.adjusted_image = self.cvu.adjust_light(curr_img, add_to_mean=True)
+      self.adjusted_image, mean_dif, rl_bb = self.cvu.adjust_light(curr_img, add_to_mean=True)
       if self.func_app.curr_func_name == "PARK_ARM_RETRACTED":
         self.analyze_PARetracted(frame_num, action, prev_img, curr_img, done)
         print("curr_func_name: ", self.func_app.curr_func_name)
       elif self.func_app.curr_func_name == "QUICK_SEARCH_FOR_CUBE":
         self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
         self.analyze_clusters.analyze(frame_num, action, prev_img, curr_img, done)
 
       elif self.func_app.curr_func_name == "GOTO_CUBE":

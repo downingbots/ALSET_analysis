@@ -267,9 +267,10 @@ class AnalyzeMap():
         # print("rnm_border:", rnm_border)
         intersect_border = intersect_borders(mol_border, rnm_border)
         if len(intersect_border) == 0:
-          cv2.imshow("nonintersecting mol", mol)
-          cv2.imshow("nonintersecting rnm", rnm)
-          cv2.waitKey(0)
+          # cv2.imshow("nonintersecting mol", mol)
+          # cv2.imshow("nonintersecting rnm", rnm)
+          # cv2.waitKey(0)
+          pass
         
         intersect_mol = image_in_border(intersect_border, gray_mol)
         intersect_rnm = image_in_border(intersect_border, gray_rnm)
@@ -568,7 +569,7 @@ class AnalyzeMap():
           plt.plot(pos,"c", label="pos");plt.legend()
           plt.plot(metric,"y", label="metric");plt.legend()
           plt.legend(); plt.tight_layout(); plt.show()
-          cv2.waitKey(0)
+          # cv2.waitKey(0)
         if best_score is None:
           # current algorithm aimed at best mse
           best_score = best_mse_score
