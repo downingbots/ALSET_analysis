@@ -79,7 +79,7 @@ class AnalyzeMap():
     ######################
     # Transforms
     ######################
-    def get_birds_eye_view(self, image):
+    def get_birds_eye_view(self, image, maskmode="OPEN_GRIPPER"):
         w = image.shape[0]
         h = image.shape[1]
         new_w = int(w * self.cfg.BIRDS_EYE_RATIO)
@@ -96,8 +96,12 @@ class AnalyzeMap():
         # Minv = cv2.getPerspectiveTransform(dst, src) # Inverse transformation
         birds_eye_view = cv2.warpPerspective(image, M, (new_w, h)) # Image warping
 
-        self.gripper_height = int(h * self.cfg.GRIPPER_HEIGHT_RATIO)
-        self.gripper_width = int(new_w * self.cfg.GRIPPER_WIDTH_RATIO)
+        if maskmode=="OPEN_GRIPPER":
+          self.gripper_height = int(h * self.cfg.GRIPPER_HEIGHT_RATIO)
+          self.gripper_width = int(new_w * self.cfg.GRIPPER_WIDTH_RATIO)
+        elif maskmode=="CLOSED_GRIPPER":
+          self.gripper_height = int(h * self.cfg.CLOSED_GRIPPER_HEIGHT_RATIO)
+          self.gripper_width = int(new_w * self.cfg.CLOSED_GRIPPER_WIDTH_RATIO)
         print("gripper h,w:", self.gripper_height, self.gripper_width)
 
         self.parked_gripper_left = np.zeros((self.gripper_height, self.gripper_width, 3), dtype=np.uint8)
@@ -111,7 +115,7 @@ class AnalyzeMap():
             birds_eye_view[h-gh-1, gw] = black
             birds_eye_view[h-gh-1, new_w-gw-1] = black
         # cv2.imshow("b4", image )
-        # cv2.imshow("birds_eye_view", birds_eye_view )
+        cv2.imshow("birds_eye_view", birds_eye_view )
         # cv2.imshow("left gripper", self.parked_gripper_left )
         # cv2.imshow("right gripper", self.parked_gripper_right )
         # cv2.waitKey(0)
@@ -141,18 +145,31 @@ class AnalyzeMap():
             if action in ["FORWARD","REVERSE"]:
               print(action, "move:", mv, cm.shape[0],cm.shape[1])
               if abs(mv) > cm.shape[0]:
+                print("move out of bounds", abs(mv), cm.shape[0])
                 continue
+              
               try:
-                curr_move = replace_border(curr_map_frame.copy(), cm.shape[0], cm.shape[1], round(mv), 0)
-              except:
+                # curr_map doesn't have border added!
+                curr_move_map = add_border(curr_map_frame.copy(), self.border_buffer)
+                curr_move_map = replace_border(curr_move_map, curr_move_map.shape[0], curr_move_map.shape[1], round(mv), 0)
+                cv2.imshow("replace border cm", cm)
+                cv2.waitKey(0)
+                # curr_move = replace_border(curr_map_frame.copy(), cm.shape[0], cm.shape[1], round(mv), 0)
+              except Exception as e:
+                  print("replace border failed", abs(mv), cm.shape[0], e)
                   continue
             elif action in ["LEFT","RIGHT"]:
-              curr_move = rotate_about_robot(curr_map_frame.copy(), mv, self.robot_origin) 
-            mse, ssim, lbp = self.score_metrics(action, prev_map_frame, curr_move)
+              curr_move_map = add_border(curr_map_frame.copy(), self.border_buffer)
+              curr_move_map = rotate_about_robot(curr_move_map, mv, self.robot_origin) 
+            prev_move_map = add_border(prev_map_frame.copy(), self.border_buffer)
+            mse, ssim, lbp = self.score_metrics(action, prev_move_map, curr_move_map)
+            print(action, "mse score:", mse, mv)
             if mse is not None and mse < best_mse:
               best_mse = mse
               best_move = mv
+              print(action, "best mse score:", mse, mv)
         if best_move is None:
+          print(action, ": no best move")
           return None
         if action == "LEFT":
           angle = best_move
@@ -164,10 +181,10 @@ class AnalyzeMap():
           return angle    
           # return angle  
         elif action == "FORWARD":
-          pixels_moved = round(best_move)
+          pixels_moved = -int(round(best_move))
           return pixels_moved
         elif action == "REVERSE":
-          pixels_moved = round(best_move)
+          pixels_moved = -int(round(best_move))
           return -pixels_moved
         else:
           print("expected L/R/Fwd/Rev")
@@ -254,7 +271,7 @@ class AnalyzeMap():
         gray_rnm = cv2.cvtColor(rnm, cv2.COLOR_BGR2GRAY)
         mse_score, ssim_score, lbp_score = None, None, None
         shape, mol_border = real_map_border(mol)
-        # print("rnm:",len(rnm))
+        print("rnm:",len(rnm))
         # print("r m b:",real_map_border(rnm))
         shape, rnm_border = real_map_border(rnm)
         if rnm_border is None:
@@ -263,18 +280,19 @@ class AnalyzeMap():
         rnm_maxh, rnm_minh, rnm_maxw, rnm_minw = get_min_max_borders(rnm_border)
         pct_w = min(4 * abs(rnm_maxw - mol_maxw) / rnm_maxw, 1)
         pct_h = min(4 * abs(rnm_maxh - mol_maxh) / rnm_maxh, 1)
-        # print("mol_border:", mol_border)
-        # print("rnm_border:", rnm_border)
         intersect_border = intersect_borders(mol_border, rnm_border)
         if len(intersect_border) == 0:
-          # cv2.imshow("nonintersecting mol", mol)
-          # cv2.imshow("nonintersecting rnm", rnm)
-          # cv2.waitKey(0)
+          print("mol_border:", mol_border)
+          print("rnm_border:", rnm_border)
+          cv2.imshow("nonintersecting mol", mol)
+          cv2.imshow("nonintersecting rnm", rnm)
+          cv2.waitKey(0)
           pass
         
         intersect_mol = image_in_border(intersect_border, gray_mol)
         intersect_rnm = image_in_border(intersect_border, gray_rnm)
         if intersect_mol is None or intersect_rnm is None:
+          print("no intersect:",intersect_mol, intersect_rnm)
           return self.cfg.INFINITE, self.cfg.INFINITE, self.cfg.INFINITE
         if action in ["LEFT","RIGHT","FORWARD","REVERSE"]:
           # finds intersecting rectangle for any action.
@@ -288,14 +306,30 @@ class AnalyzeMap():
             print("intersect min/max", mol_maxh, mol_minh, mol_maxw, mol_minw)
             # TODO: base % on full mol_border (not intersected border)
             # remove ~20% of left; ~5% of top for RNM 
-            print("pct w h:",pct_w, pct_h)
-            rnm_minw = round(rnm_minw + pct_w*(rnm_maxw-rnm_minw))
-            rnm_minh = round(rnm_minh + pct_h*(rnm_maxh-rnm_minh))
+            if action in ["LEFT"]:  
+              print("pct w h:",pct_w, pct_h)
+              rnm_minw = round(rnm_minw + pct_w*(rnm_maxw-rnm_minw))
+              rnm_minh = round(rnm_minh + pct_h*(rnm_maxh-rnm_minh))
+              # remove ~20% of right; ~5% of bottom for MOL 
+              mol_maxw = round(mol_maxw - pct_w*(mol_maxw-mol_minw))
+              mol_maxh = round(mol_maxh - pct_h*(mol_maxh-mol_minh))
+            else:
+              rnm_minw = round(rnm_minw)
+              mol_maxw = round(mol_maxw)
+              rnm_minh = round(rnm_minh)
+              mol_maxh = round(mol_maxh)
+
+            if mol_maxh-mol_minh < rnm_maxh-rnm_minh:
+              rnm_maxh -= (rnm_maxh-rnm_minh) - (mol_maxh-mol_minh)
+            elif mol_maxh-mol_minh > rnm_maxh-rnm_minh:
+              mol_maxh -= (mol_maxh-mol_minh) - (rnm_maxh-rnm_minh)
+            if mol_maxw-mol_minw < rnm_maxw-rnm_minw:
+              rnm_maxw -= (rnm_maxw-rnm_minw) - (mol_maxw-mol_minw)
+            if mol_maxw-mol_minw > rnm_maxw-rnm_minw:
+              mol_maxw -= (mol_maxw-mol_minw) - (rnm_maxw-rnm_minw)
+
             # border in format of a linear ring
             intersect_rnm_border = [[[rnm_maxh,rnm_minw]],[[rnm_maxh, rnm_maxw]], [[rnm_minh, rnm_maxw]], [[rnm_minh, rnm_minw]], [[rnm_maxh,rnm_minw]]]
-            # remove ~20% of right; ~5% of bottom for MOL 
-            mol_maxw = round(mol_maxw - pct_w*(mol_maxw-mol_minw))
-            mol_maxh = round(mol_maxh - pct_h*(mol_maxh-mol_minh))
             # border in format of a linear ring
             intersect_mol_border = [[[mol_maxh,mol_minw]],[[mol_maxh, mol_maxw]], [[mol_minh, mol_maxw]], [[mol_minh, mol_minw]], [[mol_maxh,mol_minw]]]
             # print("mol_border", mol_border)
@@ -305,10 +339,16 @@ class AnalyzeMap():
   
             intersect_mol = image_in_border(intersect_mol_border, intersect_mol)
             intersect_rnm = image_in_border(intersect_rnm_border, intersect_rnm)
-            # print("final intersect_mol h,w", intersect_mol.shape[0], intersect_mol.shape[1])
-          except:
-           intersect_mol = None 
-           intersect_rnm = None
+            print("final intersect_mol h,w", intersect_mol.shape[0], intersect_mol.shape[1])
+            print("final intersect_rnm h,w", intersect_rnm.shape[0], intersect_rnm.shape[1])
+            if (intersect_mol.shape[0] != intersect_rnm.shape[0] or
+                intersect_mol.shape[1] != intersect_rnm.shape[1]):
+# ARD: new error.
+              print("Error: wrong shape")
+          except Exception as e:
+            print("score_metrics exception:",e)
+            intersect_mol = None 
+            intersect_rnm = None
 
         if intersect_mol is None or intersect_rnm is None:
           return self.cfg.INFINITE, self.cfg.INFINITE, self.cfg.INFINITE
@@ -358,18 +398,21 @@ class AnalyzeMap():
               k_interval = self.cfg.RADIAN_THRESH
           elif mode in ["OFFSET_H", "OFFSET_W"]:
             k_interval = round((end_pos-start_pos)*k*.125)
-            if k_interval <= 1:
-              k_interval = 1
+            if abs(k_interval) <= 1 :
+              if k_interval>=0:
+                k_interval = 1
+              else:
+                k_interval = 0
           # measure input
           # measure input
           if k < 7:  
             # gather some data to get basic MSE curve
             # from 7 interior points followed by the two endpoints 
             if mode == "ROTATE":
-              mse_pos = rad_sum2(action, start_pos, k_interval)
+              mse_pos = np.int(rad_sum2(action, start_pos, k_interval))
             elif mode in ["OFFSET_H", "OFFSET_W"]:
-              mse_pos = round(start_pos + k_interval)
-            print(action, "mse_pos:", mse_pos, start_pos, end_pos)
+              mse_pos = np.int(round(start_pos + k_interval))
+            print(action, "mse_pos:", mse_pos, start_pos, end_pos, k, k_interval)
           elif k == 7:  
               mse_pos = start_pos
           elif k == 8:  
@@ -380,8 +423,9 @@ class AnalyzeMap():
           elif k < 16:  
             # drill down to 7 finer resolution values within the min range
             if pos_lower is None:
-              if len(mse) != 0 and len(pos) != 0:
+              if len(mse) != 0 and len(pos) != 0 and mse[0] != self.cfg.INFINITE:
                 print("mse,pos", len(mse), len(pos))
+                print("mse,pos", mse, pos)
                 mse_z = np.polyfit(mse, pos, 2)
                 mse_f = np.poly1d(mse_z)
                 # predict new value
@@ -396,6 +440,9 @@ class AnalyzeMap():
                 mse_x_min = mse_r_crit[mse_test>0]
                 mse_y_min = mse_f(mse_x_min)
                 print("mse_x_min, mse_y_min:", mse_x_min, mse_y_min)
+              else:
+                mse_x_min = []
+                mse_y_min = []
 
               # Hopefully, stats can narrow this down in the future
               # [0.18868234 0.04772681]
@@ -410,6 +457,7 @@ class AnalyzeMap():
                   print(action, "pos_low/up3:", pos_lower, pos_upper)
                 elif mode == "ROTATE" and min_index == len(mse)-1:
                   increment = rad_interval(end_pos,start_pos)*.125/2
+                  pos_lower = start_pos
                   pos_upper = rad_dif2(action, pos_lower, increment)
                   print(action, "pos_low/up1:", pos_lower, pos_upper)
                 elif mode == "ROTATE":
@@ -450,7 +498,7 @@ class AnalyzeMap():
                   elif mode == "OFFSET_H" or mode == "OFFSET_W":
                     pos_lower = round(start_pos + (end_pos-start_pos)*x*.125)
                     pos_upper = round(start_pos + (end_pos-start_pos)*(x+1)*.125)
-                    print("pos lower, upper, mse_x_min:", pos, pos, mse_x_min)
+                    print(mode,"pos lower, upper, mse_x_min:", pos_lower, pos_upper, x, mse_x_min)
                     if len(mse_x_min) > 1:
                       increment = round((end_pos-start_pos)*.125)
                       mse_pos = round(start_pos + increment/2 + increment*x)
@@ -484,34 +532,35 @@ class AnalyzeMap():
             # - ssim is correlated to MSE
             # - lbp fluctuates a lot as the curve is moved. It is a measure
             #   of image comparison, but not a good fit for this MSE algorithm.
-            print("mse polyfit", len(mse))
-            print("pos polyfit", len(pos))
-            mse_z = np.polyfit(mse, pos, 2)
-            mse_f = np.poly1d(mse_z)                            
-            # predict new value
-            prev_mse_score = mse_score
-            prev_ssim_score = ssim_score
-            prev_lbp_score = lbp_score
-
-            # get local minima for MSE
-            mse_crit = mse_f.deriv().r
-            mse_r_crit = mse_crit[mse_crit.imag==0].real
-            mse_test = mse_f.deriv(2)(mse_r_crit) 
-            mse_x_min = mse_r_crit[mse_test>0]
-            mse_y_min = mse_f(mse_x_min)
-            print("mse_x_min, mse_y_min:", mse_x_min, mse_y_min)
-            if len(mse_x_min) == 1:
-              mse_pos = mse_x_min[0]
-            elif len(mse_x_min) == 0:
-              # probably an end point
-              mse_y_min = min(mse) 
-              min_index = mse.index(mse_y_min)
-              mse_pos = pos[min_index]
-            print("mse polyfit", len(mse))
-            print("pos polyfit", len(pos))
-            if rad_interval(mse_pos, 0) > rad_interval(start_pos, end_pos):
-              print("predicted mse out of range.")
-              mse_pos = end_pos
+            print("mse polyfit", len(mse), mse)
+            print("pos polyfit", len(pos), pos)
+            if len(mse) != 0 and len(pos) != 0 and mse[0] != self.cfg.INFINITE:
+              mse_z = np.polyfit(mse, pos, 2)
+              mse_f = np.poly1d(mse_z)                            
+              # predict new value
+              prev_mse_score = mse_score
+              prev_ssim_score = ssim_score
+              prev_lbp_score = lbp_score
+  
+              # get local minima for MSE
+              mse_crit = mse_f.deriv().r
+              mse_r_crit = mse_crit[mse_crit.imag==0].real
+              mse_test = mse_f.deriv(2)(mse_r_crit) 
+              mse_x_min = mse_r_crit[mse_test>0]
+              mse_y_min = mse_f(mse_x_min)
+              print("mse_x_min, mse_y_min:", mse_x_min, mse_y_min)
+              if len(mse_x_min) == 1:
+                mse_pos = mse_x_min[0]
+              elif len(mse_x_min) == 0:
+                # probably an end point
+                mse_y_min = min(mse) 
+                min_index = mse.index(mse_y_min)
+                mse_pos = pos[min_index]
+              print("mse polyfit", len(mse))
+              print("pos polyfit", len(pos))
+              if rad_interval(mse_pos, 0) > rad_interval(start_pos, end_pos):
+                print("predicted mse out of range.")
+                mse_pos = end_pos
 
           # compute rotation and new mse
           curr_move = curr_frame.copy()
@@ -529,13 +578,20 @@ class AnalyzeMap():
           mse_score, ssim_score, lbp_score = self.score_metrics(action, prev_move, curr_move, dbg_compare)
           metric_score = ((mse_score)*(ssim_score)*(lbp_score))
           print("mse_pos", mse_pos)
-          if mse_pos is not None and mse_score is not None:
+
+          if (mse_pos is not None and 
+             ((mse_pos != 0 and best_mse_pos is not None and best_mse_pos == 0)              or not(mse_pos == 0 and best_mse_pos is not None)) 
+             and mse_score is not None):
+            # Note: don't override a best_mse_pos with a zero pos
             pos.append(mse_pos)
             mse.append(mse_score)
             ssim.append(ssim_score)
             lbp.append(lbp_score)
             metric.append(metric_score)
-            if mse_score < best_mse_score:
+            if best_mse_score == 0:
+              best_mse_score = mse_score 
+              best_mse_pos = mse_pos 
+            elif mse_score < best_mse_score and mse_pos != 0:
               best_mse_score = mse_score 
               best_mse_pos = mse_pos 
             if ssim_score < best_ssim_score:
@@ -749,7 +805,8 @@ class AnalyzeMap():
                           end_pos=end_pos,
                           frame_num=frame_num, start_N=0)
             # new angle should never be outside of the start/end range
-            if (rad_interval(end_pos, start_pos) <= rad_interval(new_angle_lms, 0)):
+            if (end_pos is None or start_pos is None or new_angle_lms is None
+                or rad_interval(end_pos, start_pos) <= rad_interval(new_angle_lms, 0)):
               print("Error: angle out of range:", end_pos, start_pos, new_angle_lms)
 
             new_angle = new_angle_lms
@@ -852,7 +909,7 @@ class AnalyzeMap():
               metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] )
             if best_mse is None or metrics[mode]["MSE"] < best_mse:
               best_mse = metrics[mode]["MSE"]
-              best_move = pixels_moved 
+              best_move = -pixels_moved 
               print(mode, action, "new best_move:", best_move, best_mse)
           print("ln, kp, lms movement:", pixels_moved_ln, pixels_moved_kp, pixels_moved_mse)
           return best_move 
@@ -912,7 +969,16 @@ class AnalyzeMap():
 
           rotated_robot_rectangle = cv2.circle(self.map_overlay,loc,3,(255,0,0),-1)
           if self.frame_num >= 130:
-            cv2.imshow("map_overlay", self.map_overlay)
+            map_ovrlay = self.map_overlay.copy()
+            # make map_overlay easier to see on screen
+            # map_ovrlay = replace_border(map_ovrlay, map_ovrlay.shape[0], map_ovrlay.shape[1], 0,0)
+            # TODO: add a function display_without_top_border()
+            # TODO: Fix move forward display and rotation. It doesn't line up well with
+            #       previous image.  Filter out the gripper/cube from image.
+            #       Number of pixels is overestimated?  Maybe related to birdseyeview too.
+
+            cv2.imshow("map_overlay", map_ovrlay)
+            # cv2.imshow("map_overlay", self.map_overlay)
             cv2.waitKey(0)
 
     #################################
@@ -923,7 +989,11 @@ class AnalyzeMap():
         self.frame_num = frame_num
         curr_image = cv2.imread(curr_img_pth)
         curr_image_KP = Keypoints(curr_image)
-        bird_eye_vw = self.get_birds_eye_view(curr_image)
+        # ARD: TODO: fix frame_num hack
+        if frame_num > 213:
+          bird_eye_vw = self.get_birds_eye_view(curr_image, maskmode="CLOSED_GRIPPER")
+        else:
+          bird_eye_vw = self.get_birds_eye_view(curr_image)
         if self.curr_move is not None:
           self.prev_move = self.curr_move.copy()
         self.curr_move = bird_eye_vw
@@ -984,7 +1054,8 @@ class AnalyzeMap():
           # in future, can add position of each move leading to this point
           ###########################
           if action in ["LEFT", "RIGHT"]:
-            self.robot_orientation = rad_sum(self.robot_orientation, best_angle)
+            if best_angle is not None:
+              self.robot_orientation = rad_sum(self.robot_orientation, best_angle)
             print("Robot Orientation:", self.robot_orientation)
           elif action in ["FORWARD", "REVERSE"]:
             # In local map, the robot moves straight up but

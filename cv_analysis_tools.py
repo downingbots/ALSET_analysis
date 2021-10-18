@@ -620,7 +620,10 @@ class CVAnalysisTools():
   # do bi-modal light adjustment if necessary.
   ###################
   def adjust_light(self, frame_path, add_to_mean=False, gripper_state="FULLY_OPEN"):
-      img = cv2.imread(frame_path)
+      try:
+        img = cv2.imread(frame_path)
+      except:
+        img = frame_path.copy()
       font = cv2.FONT_HERSHEY_SIMPLEX
       hsv  = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2HSV)
       h, s, v = cv2.split(hsv)

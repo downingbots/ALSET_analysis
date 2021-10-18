@@ -34,6 +34,7 @@ def replace_border(img, desired_height, desired_width, offset_height, offset_wid
     insert_height = int(extract_height + 2*abs(offset_height))
     insert_width  = int(extract_width + 2*abs(offset_width))
     insert_img_rect = np.zeros((insert_height,insert_width,3),dtype="uint8")
+    print("ext_h, ins_h, off_h:", extract_height, insert_height, offset_height)
     for eh in range(extract_height):
       for ew in range(extract_width):
         new_w = ew + abs(offset_width) + offset_width
@@ -94,6 +95,22 @@ def rotate_about_robot(image, angle, robot_location):
     # cv2.waitKey(0)
     return out
 
+def middle_angle(pt1, angle_pt, pt2):
+  # dist1 = np.sqrt((pt1[0] - angle_pt[0])**2 + (pt1[1] - angle_pt[1])**2)
+  # dist2 = np.sqrt((pt2[0] - angle_pt[0])**2 + (pt2[1] - angle_pt[1])**2)
+  # dist3 = np.sqrt((pt1[0] - pt2[0])**2 + (pt1[1] - pt2[1])**2)
+  # rad_angle = np.arccos((dist1**2 + dist2**2 - dist3**2) / (2.0 * dist1 * dist2))
+  # return rad_angle
+  dx1 = pt1[0] - angle_pt[0]
+  dy1 = pt1[1] - angle_pt[1]
+  dx2 = pt2[0] - angle_pt[0]
+  dy2 = pt2[1] - angle_pt[1]
+  rad_angle2 = (dx1*dx2 + dy1*dy2)/np.sqrt((dx1*dx1 + dy1*dy1)*(dx2*dx2 + dy2*dy2) + 1e-10)
+
+  # print("compare angles:", rad_angle, rad_angle2)
+  return rad_angle2
+
+
 def real_map_border(mapimg, ret_outside=True):
     # convert the stitched image to grayscale and threshold it
     # such that all pixels greater than zero are set to 255
@@ -136,6 +153,15 @@ def real_map_border(mapimg, ret_outside=True):
           shape = "Triangle"
         elif len(approximations) == 4:
           shape = "Trapezoid"
+          # area = Polygon(b2).area
+          # if area > 100 &  cv2.isContourConvex(approximations):
+#          if cv2.isContourConvex(approximations):
+#            max_Cosine = -1000000000000000000
+#            for j in range(2, 5):
+#              cosine = abs(middle_angle(approximations[j%4], approximations[j-2], approximations[j-1]))
+#              maxCosine = max(maxCosine, cosine)
+#            if maxCosine < 0.3 and maxCos >= 0:
+#              shape = "Square"
         elif len(approximations) == 5:
           shape = "Pentagon"
         elif 6 < len(approximations) < 15:
@@ -378,6 +404,7 @@ def line_intersect_border(poly, pt1, pt2, ignore_pt, border):
 
 def rectangle_in_border(border):
     dbg = False
+    # dbg = True
     poly = border_to_polygon(border)
     try:
       minw, minh, maxw, maxh = poly.bounds
@@ -419,6 +446,7 @@ def rectangle_in_border(border):
         print("Line Left", pt, pt1, pt2, ignore_pt)
       horiz_pt = line_intersect_border(poly, pt1, pt2, ignore_pt, border)
       if horiz_pt is None:
+        # ARD: pt1 is off by 1
         pt1 = [pt[0],pt[1]+1]
         # pt2 = [pt[0],pt[1]+maxw]
         pt2 = [pt[0],pt[1]+maxh]
@@ -433,6 +461,7 @@ def rectangle_in_border(border):
       pt2 = [vert_pt[0],horiz_pt[1]]
       ignore_pt = [None, vert_pt[1]]
       if dbg:
+        # ARD: vert is off by 1
         print("vert:", vert_pt)
         print("horiz:", horiz_pt)
         print("Find Diag", pt1, pt2, ignore_pt)
@@ -468,6 +497,7 @@ def rectangle_in_border(border):
         # max_h = int(max(pt[0], diag_pt[0]))
         # max_w = int(max(pt[1], diag_pt[1]))
         min_w = int(min(pt[0], diag_pt[0])) # why does w&h seem reversed??
+        # why is min_h off by 1?
         min_h = int(min(pt[1], diag_pt[1])) # ... gives the right results tho
         max_w = int(max(pt[0], diag_pt[0]))
         max_h = int(max(pt[1], diag_pt[1]))

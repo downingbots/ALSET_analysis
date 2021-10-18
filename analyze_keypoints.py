@@ -158,6 +158,7 @@ class Keypoints:
         move_match = []
         if self.border is None:
           border_shape, self.border = real_map_border(self.img)
+        print("border:", self.border)
         # print("num matches: ", len(good_matches))
         for i,kpm in enumerate(good_matches):
           # print("queryIdx:", kpm[0].queryIdx, kpm[1].queryIdx)
@@ -167,14 +168,15 @@ class Keypoints:
           # print("kp1t:",self.keypoints[kpm[0].queryIdx].pt)
           # print("kp2q:",KP2.keypoints[kpm[1].trainIdx].pt)
           # print("dist:", kpm[0].distance, kpm[1].distance)
+          print("kpm:", kpm)
           ((queryIdx, trainIdx, dist), (n_queryIdx, n_trainIdx, n_dist), ratio) = kpm
           kp1 = self.keypoints[queryIdx]
-          kp2 = KP2.keypoints[trainIdx]
+          kp2 = KP2.keypoints[n_trainIdx]
           # (x,y) and (h,w) mismatch
           h,w = 1,0 
           rl = [robot_location[h], robot_location[w]]
           # rl = robot_location
-          if point_in_border(self.border,kp1.pt) and point_in_border(self.border,kp2.pt):
+          if point_in_border(self.border,kp1.pt, 2) and point_in_border(self.border,kp2.pt, 2):
             # if action is "LEFT", the prevframe kp1 should be left of curr frame kp2.
             #   assert: abs(kp1[h] - kp2[h]) < abs(kp1[w] - kp2[w])
             #   assert: kp1[w] < kp2[w]
@@ -194,17 +196,22 @@ class Keypoints:
                 continue
               angle_match = angle_match_count(angle_match, rads, self.cfg.RADIAN_THRESH)
             if action in ["FORWARD"]:
-              if abs(kp1.pt[w] - kp2.pt[w]) > 2 or kp1.pt[h] <= kp2.pt[h]:
+              if abs(kp1.pt[w] - kp2.pt[w]) > 20 or kp1.pt[h] >= kp2.pt[h]:
                 print("FWD assert: KP fails", kp1.pt, kp2.pt)
                 continue
             elif action in ["REVERSE"]:
-              if abs(kp1.pt[w] - kp2.pt[w]) > 2 or kp1.pt[h] >= kp2.pt[h]:
+              if abs(kp1.pt[w] - kp2.pt[w]) > 20 or kp1.pt[h] <= kp2.pt[h]:
                 print("Rev assert: KP fails", kp1.pt, kp2.pt)
                 continue
             if action in ["FORWARD","REVERSE"]:
-              pix_moved = abs(kp1.pt[h] - kp2.pt[h])
+              pix_moved = abs(kp2.pt[h] - kp1.pt[h])
               print("Fwd/Rev KP match:", kp1.pt, kp2.pt, pix_moved)
               move_match = move_match_count(move_match, pix_moved, 2)
+          else:
+            if not point_in_border(self.border,kp1.pt):
+              print("kp1 point not in border", kp1.pt)
+            if not point_in_border(self.border,kp2.pt):
+              print("kp2 point not in border", kp2.pt)
 
         if action in ["LEFT", "RIGHT"] and len(angle_match) >= 1:
           # was: return best count; now: return list for mse eval 
@@ -321,6 +328,10 @@ class Keypoints:
           d = m.distance/n.distance
           if m.distance < 0.75*n.distance:
               good.append(((m.queryIdx, m.trainIdx, m.distance), (n.queryIdx, n.trainIdx, n.distance), d))
+              print("good kp1:",self.keypoints[m.queryIdx].pt)
+              print("good kp2:",KP2.keypoints[n.trainIdx].pt)
+              print("--------")
+
           else:
               notsogood.append(((m.queryIdx, m.trainIdx, m.distance), (n.queryIdx, n.trainIdx, n.distance), d))
       good = sorted(good, key=itemgetter(2))
@@ -328,6 +339,7 @@ class Keypoints:
       if not include_dist:
          good = [g[:-1] for g in good]
          notsogood = [g[:-1] for g in notsogood]
+      print("len good / notsogood matches:", len(good), len(notsogood))
       return good, notsogood
 
     def get_n_match_kps(self, matches, KP2, n, return_list=True, border=None):
@@ -376,12 +388,13 @@ class Keypoints:
         return KP1_kps, KP2_kps
 
     def drawKeypoints(self, color=(0,255,0)):
+        kp_img = self.img.copy()
         if self.kp_mode == "SIFT":
-           return cv.drawKeypoints(self.img,self.keypoints,None,color=(0,255,0), flags=0)
+           return cv.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
         elif self.kp_mode == "ORB":
-           return cv.drawKeypoints(self.img,self.keypoints,None,color=(0,255,0), flags=0)
+           return cv.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
         elif self.kp_mode == "SURF":
-           return cv.drawKeypoints(self.img,self.keypoints,None,color=(0,255,0), flags=0)
+           return cv.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
            # return cv.drawMatchesKnn(self.img,self.get_kp(),
            #                        self.KP,self.get_kp(), good_matches, None,
            #                        flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)

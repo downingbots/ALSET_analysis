@@ -76,6 +76,7 @@ class Config():
                             "QUICK_SEARCH_FOR_BOX_WITH_CUBE",
                             "RELOCATE",
                             "GOTO_CUBE",
+                            # CUBE, CONTAINER, BALL, SIGN, x-SIGN, COLORED OBJECT, FIDUCIAL
                             "PICK_UP_CUBE",
                             "HIGH_SLOW_SEARCH_FOR_CUBE",
                             "HIGH_SLOW_SEARCH_FOR_BOX_WITH_CUBE",
@@ -86,28 +87,63 @@ class Config():
                             "MOVEMENT_CHECK",
                             ## JETBOT ATOMIC NNs 
                             # "LINE_FOLLOWING", "FACE_RECOGNITION", "OBJECT_FOLLOWING", 
-                            # "GOTO_OBJECT",
+                            # "GOTO_OBJECT o", (name and remember object)
+                            # "GOTO_LOCATION l", (name and remember location)
+                            # "FORWARD/LEFT/RIGHT/etc #", 
+                            # "WAIT_FOR_OBJECT o", (name and remember location)
+                            # "SEARCH_FOR_OBJECT o", (name and remember location)
+                            # "RECOGNIZE_OBJECT o", (put object on a rotating platform)
+                            # "EXPLORE_AND_MAP", (name and remember location)
+                            # "WAIT_FOR_MOVEMENT" (return object, if known)
+                            # "WAIT_TIME"
                             # "OBJECT_AVOIDANCE", 
+                            # "CHARGE", 
                             ## OTHER ATOMIC NNs FOR SUBSUMPTION
                             # "GOTO_DARK_PLACE", "GOTO_BRIGHT_PLACE",
                             # "HAPPY_DANCE", "YES", "NO", "I_WANT", "IM_THINKING"
                             # "LOOK_AT_FACE", "TRACK_FACE",
+                            # "GO_WHERE_FINGER_POINTS_AND_FIND_OBJECT_AND_PICKUP"
+                            # "GO_WHERE_FINGER_POINTS_AND_PARK_AND_WAIT"
+                            # "WAKE_UP_AFTER_HUMAN_WAVE"
                             # "FOLLOW_AND_REACH_FOR"
+                            # "FOLLOW_WALL"
+                            # "FOLLOW_OBJECT"
+                            # "FOLLOW_ROUTE"
+                            # "(UN)LOAD_PALLET"  # fork lift
+                            # "(UN)STACK_PALLET"  # fork lift
+                            # "(UN)STACK_OBJECT"  # fork lift
+                            # "LINEUP_OBJECTS"  # fork lift
+                            # "GOTO_LOCATION_BY_TRIANGULATION"  # fork lift
+                            # "GOTO_LOCATION_BY_FIDUCIAL"  # fork lift
+                            # "DRIVE_AROUND_AND_MEMORIZE_OBJECT x"
+                            # "DRIVE_AROUND_AND_MEMORIZE_LOCATION x"
 
                             ## FIDUCIAL
                             # "QUICK_SEARCH_FOR_FIDUCIAL"
                             # "DRIVE_TO_FIDUCIAL"
                             # "PICK UP FIDUCIAL"     -> aim at 
-                            # "PUSH"
+                            # "PUSH"  # is this just grab and forward?
+                            # "PULL"  # is this just grab and reverse?
                             # "PUSH WITH GRIPPER"
+                            # "PICK_AND_PLACE"   
+                            # "DECLUTTER"   
 
-                            # "Drive to BOUNDING BOX" -> approach angle must be known for pickup
+                            # "DIG_TRENCH" "DIG_HOLE" "MAKE_PLATFORM" (dimensions)
+                            # "MAKE_RAMP" "MAKE_PILE"
+                            # "LOAD_CONVEYER"
+                            # "FLATTEN" # pat down / level
+                            # "TRANSPORT" <dirt, snow, gravel, wood, etc>
+                            # "DEMOLISH"
                             # "PICK UP BOUNDING_BOX" -> aim at center?
+                            # "PARK_IN_LOT"
 
                             # Wrist rotation is finicky, requiring a NN. It has minimal strength.
                             # In general, keep horizontal.
                             # "ROTATE_WRIST_HORIZ"
                             # "ROTATE_WRIST_VERT"
+
+                            # accessories: speaker, microphone, mini-touch display, buttons, 
+                            #     recharger, 
                             ]
 
       # self.func_key_val will add key-value attributes to the functions via add_to_func_key_value
@@ -551,9 +587,12 @@ class Config():
       self.MSE_THRESH    = 140
       self.SSIM_THRESH   = 0.5
       self.LBP_THRESH    = 0.05
-      self.GRIPPER_HEIGHT_RATIO =  8 / 32
+      self.CLOSED_GRIPPER_WIDTH_RATIO  =  16 / 32
+      self.CLOSED_GRIPPER_HEIGHT_RATIO =  14 / 32
       self.GRIPPER_WIDTH_RATIO  = 11 / 32
+      self.GRIPPER_HEIGHT_RATIO =  8 / 32
       self.BIRDS_EYE_RATIO      = 48 / 32
+      # self.BIRDS_EYE_RATIO      = 55 / 32
 
 
 

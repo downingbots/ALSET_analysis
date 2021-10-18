@@ -2,6 +2,7 @@ import cv2
 from cv_analysis_tools import *
 from analyze_color import *
 from dataset_utils import *
+from cube import *
 
 class AnalyzeGripper():
 
@@ -189,6 +190,7 @@ class AnalyzeGripper():
       return [safe_ground_bb, safe_ground_img, safe_ground_lbp]
 
   def analyze(self, frame_num, action, prev_img_path, curr_img_path, done=False, curr_func_name=None):
+      left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info = [],[],[None]
       save = False 
       if self.gripper_open_cnt == 0 and self.gripper_close_cnt == 0:
         init = True
@@ -350,7 +352,12 @@ class AnalyzeGripper():
               cv2.imshow("mean_contour", image)
             if curr_func_name in ["SEARCH_FOR_CUBE", "GOTO_CUBE", "PICK_UP_CUBE", "GOTO_BOX_WITH_CUBE", "DROP_CUBE_IN_BOX"]:
                 obj_nm = self.get_obj_name(curr_func_name)
-                obj_bounding_box = self.get_object_bounding_box(left_gripper_bounding_box, right_gripper_bounding_box, curr_img)
+                # obj_bounding_box = self.get_object_bounding_box(left_gripper_bounding_box, right_gripper_bounding_box, curr_img)
+                if obj_nm == "CUBE":
+                  print("find cube")
+                  curr_img, mean_dif, rl_bb = self.cvu.adjust_light(curr_img_path)
+                  find_cube(curr_img)
+
             if action == "FORWARD":
                 # prev_img is pre-FORWARD ; curr_img is post-FORWARD 
                 safe_ground_info = self.get_safe_ground(left_gripper_bounding_box, right_gripper_bounding_box, None, prev_img_path)
@@ -382,7 +389,7 @@ class AnalyzeGripper():
       # gripper contour and edges do worse than pixel movements (averaged/overlapped).
       # self.gripper_contours(curr_img_path)
       # self.gripper_edges(curr_img_path)
-      return left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info[0], 
+      return [left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info[0]]
 
   def check_cube_in_gripper(self, frame_num, action, prev_img_path, curr_img_path, done):
       pass

@@ -87,7 +87,7 @@ class LineAnalysis():
           # h1 - h2 = m1*w1  - m2*w2
           robot_w = robot_location[1]
           offset_h = robot_w * (cm_ln[1]-cm_ln[3])/(cm_ln[0]-cm_ln[2]) - robot_w * (pm_ln[1]-pm_ln[3])/(pm_ln[0]-pm_ln[2])
-          print("offset_h", offset_h)
+          print("offset_h @ robot_w", offset_h, robot_w, (cm_ln[1]-cm_ln[3])/(cm_ln[0]-cm_ln[2]), (pm_ln[1]-pm_ln[3])/(pm_ln[0]-pm_ln[2]))
           offset_h_match_count(offset_match, offset_h)
           return offset_h
 
@@ -191,7 +191,7 @@ class LineAnalysis():
           if len(angle_match) >= 1:
             # Was: do a count; now caller does mse comparison
             angle_list = [a[0] for a in angle_match]
-            print("Angle match:", angle_match, angle_list)
+            print("angle match:", angle_match, angle_list)
             return(angle_list)
 
             # max_a, max_c = self.cfg.INFINITE, - self.cfg.INFINITE

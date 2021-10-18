@@ -257,18 +257,18 @@ class DSAnalysis():
       elif self.func_app.curr_func_name == "GOTO_CUBE":
 #        self.cube_analysis.analyze(frame_num, action, prev_img, curr_img, done)
         self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
         self.analyze_clusters.analyze(frame_num, action, prev_img, curr_img, done)
       elif self.func_app.curr_func_name == "PICK_UP_CUBE":
 #        self.cube_analysis.analyze(frame_num, action, prev_img, curr_img, done)
 #        self.pickup_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)
-         result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+         result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
          pass
       elif self.func_app.curr_func_name == "PARK_ARM_RETRACTED_WITH_CUBE":
         result = self.gripper_analysis.check_cube_in_gripper(frame_num, action, prev_img, curr_img, done)
-        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
       elif self.func_app.curr_func_name == "QUICK_SEARCH_FOR_BOX_WITH_CUBE":
-#        result = self.gripper_analysis.check_cube_in_gripper(frame_num, action, prev_img, curr_img, done)
+        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
         self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
 #        self.analyze_clusters.analyze(frame_num, action, prev_img, curr_img, done)
       elif self.func_app.curr_func_name == "GOTO_BOX_WITH_CUBE":
@@ -276,10 +276,10 @@ class DSAnalysis():
         self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
         result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
       elif self.func_app.curr_func_name == "DROP_CUBE_IN_BOX":
-#        result = self.gripper_analysis.check_cube_in_gripper(frame_num, action, prev_img, curr_img, done)
+        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
 #        self.box_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)
         print("PAR1")
-        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
       self.store_state()
       return done 
 
