@@ -573,8 +573,12 @@ class Config():
       # self.MAP_ROBOT_H_POSE     = 200        # offset from bottom of image to middle of robot
       # self.MAP_ROBOT_H_POSE     = 300        # offset from bottom of image to middle of robot
 
-      p = 20
-      robot_w, robot_len = 19,25
+      # TODO: The birds eye view needs to be much wider and longer
+      # p = 30
+      # p = 20
+      # robot_w, robot_len = 30,36
+      p = 40
+      robot_w, robot_len = (p-6), p
       n = 5
       m = 3
       self.MAP_ROBOT_H_POSE     = n*p        # offset from bottom of image to middle of robot
@@ -588,10 +592,19 @@ class Config():
       self.SSIM_THRESH   = 0.5
       self.LBP_THRESH    = 0.05
       self.CLOSED_GRIPPER_WIDTH_RATIO  =  16 / 32
-      self.CLOSED_GRIPPER_HEIGHT_RATIO =  14 / 32
-      self.GRIPPER_WIDTH_RATIO  = 11 / 32
-      self.GRIPPER_HEIGHT_RATIO =  8 / 32
-      self.BIRDS_EYE_RATIO      = 48 / 32
+      self.CLOSED_GRIPPER_HEIGHT_RATIO =  12 / 32
+      self.GRIPPER_WIDTH_RATIO  = 6 / 32
+      self.GRIPPER_HEIGHT_RATIO =  3 / 32
+
+      # Vertical FOV    41.41deg = 4.35
+      # Horizonatal FOV 53.5 deg = 3.36
+      # self.BIRDS_EYE_RATIO_H = 2.4 # added to H
+      # self.BIRDS_EYE_RATIO_W = 4.4 # multiplied by W
+      self.BIRDS_EYE_RATIO_H = 3.4 # added to H
+      self.BIRDS_EYE_RATIO_W = 5.4 # multiplied by W
+      # self.BIRDS_EYE_RATIO_H = 3 # added to H
+      # self.BIRDS_EYE_RATIO_W = 4 # multiplied by W
+      # self.BIRDS_EYE_RATIO      = 48 / 32
       # self.BIRDS_EYE_RATIO      = 55 / 32
 
 

@@ -170,7 +170,7 @@ class CVAnalysisTools():
 #      image = self.foreground.copy()
 #      cv2.drawContours(image, contour_list, -1, (0, 255, 0), 2)
 #      cv2.imshow("Gripper Output", image)
-      cv2.imshow("Gripper FG", self.foreground)
+      # cv2.imshow("Gripper FG", self.foreground)
       # cv2.imshow("Gripper prev", prev_img)
       # cv2.imshow("Gripper curr", curr_img)
       # cv2.imshow("Gripper Output", self.foreground)
@@ -200,7 +200,7 @@ class CVAnalysisTools():
       # invert mask and combine with original image - this makes the black outer edge white
       mask_inv = cv2.bitwise_not(self.foreground)
       moved_pix = cv2.bitwise_or(gray_curr_img, mask_inv)
-      cv2.imshow("moved pix", moved_pix)
+      # cv2.imshow("moved pix", moved_pix)
       left_bb, right_bb, moved_pix = self.get_gripper_bounding_box(moved_pix, curr_img)
       return left_bb, right_bb, moved_pix
 
@@ -411,7 +411,8 @@ class CVAnalysisTools():
       #      L2gradient is of boolean type, and its default value is False.
       # edges = cv2.Canny(img, 75, 200, None, 3)
       # edges = cv2.Canny(img, 50, 200, None, 3)
-      edges = cv2.Canny(img, 50, 200, None, 3)
+      # edges = cv2.Canny(img.copy(), 50, 200, None, 3)
+      edges = cv2.Canny(img.copy(), 10, 245, None, 3)
       # edges = cv2.Canny(img,100,200)
       # Copy edges to the images that will display the results in BGR
       imglinesp = np.copy(img)
@@ -426,15 +427,21 @@ class CVAnalysisTools():
       #   maxLineGap: Maximum allowed gap between points on the same line to link them.
       #
       #   linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 10, 10)
-      linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 20, 20)
-      if linesP is not None:
-          print("num linesP:", len(linesP))
-          for i in range(0, len(linesP)):
-              l = linesP[i][0]
-              cv2.line(imglinesp, (l[0], l[1]), (l[2], l[3]), (0,255,0), 3, cv2.LINE_AA)
+      # linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 20, 20)
+      linesP = cv2.HoughLinesP(edges, 1, np.pi / 180, 50, None, 40, 40)
+      HB = HoughBundler()
+      mergedLinesP = HB.process_lines(linesP, edges)
+      mlLinesP = []                 # put back in HoughLineP format
+      if mergedLinesP is not None:
+          print("num linesP:", len(linesP), len(mergedLinesP))
+          for i in range(0, len(mergedLinesP)):
+              l0 = mergedLinesP[i][0]
+              l1 = mergedLinesP[i][1]
+              cv2.line(imglinesp, (l0[0], l0[1]), (l1[0], l1[1]), (0,255,0), 3, cv2.LINE_AA)
+              mlLinesP.append([[l0[0], l0[1], l1[0], l1[1]]])
       # cv2.imshow("lines:", imglinesp)
       # cv2.waitKey(0)
-      return linesP, imglinesp
+      return mlLinesP, imglinesp
 
   def find_longest_line(self, linesP, border=None):
       max_dist = 0
@@ -512,7 +519,8 @@ class CVAnalysisTools():
   
   def color_quantification(self, img, num_clusters):
       # try color quantification
-      Z = img.reshape((-1,3))
+      Z = img.copy()
+      Z = Z.reshape((-1,3))
       # convert to np.float32
       Z = np.float32(Z)
       # define criteria, number of clusters(K) and apply kmeans()
@@ -622,8 +630,12 @@ class CVAnalysisTools():
   def adjust_light(self, frame_path, add_to_mean=False, gripper_state="FULLY_OPEN"):
       try:
         img = cv2.imread(frame_path)
-      except:
-        img = frame_path.copy()
+      except Exception as e:
+        try:
+          img = frame_path.copy()
+        except:
+          print("Error: unable to read:", frame_path, e)
+          return None, None, None
       font = cv2.FONT_HERSHEY_SIMPLEX
       hsv  = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2HSV)
       h, s, v = cv2.split(hsv)
@@ -715,8 +727,8 @@ class CVAnalysisTools():
 
           final_hsv = cv2.merge((h, s, unlit_v))
           adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
-          cv2.imshow("Orig Image", img)
-          cv2.imshow("Light Adjusted Image", adjusted_img)
+          # cv2.imshow("Orig Image", img)
+          # cv2.imshow("Light Adjusted Image", adjusted_img)
           # cv2.waitKey(0)
           return adjusted_img, mean_dif, robot_light_bounding_box
 
@@ -727,8 +739,164 @@ class CVAnalysisTools():
 
           final_hsv = cv2.merge((h, s, v))
           adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
-          cv2.imshow("Orig Image", img)
-          cv2.imshow("Light Adjusted Image", adjusted_img)
+          # cv2.imshow("Orig Image", img)
+          # cv2.imshow("Light Adjusted Image", adjusted_img)
           # cv2.waitKey(0)
       return adjusted_img, mean_dif, None
+
+# from: https://stackoverflow.com/questions/45531074/how-to-merge-lines-after-houghlinesp
+class HoughBundler:
+    '''Clasterize and merge each cluster of cv2.HoughLinesP() output
+    a = HoughBundler()
+    foo = a.process_lines(houghP_lines, binary_image)
+    '''
+
+    def get_orientation(self, line):
+        '''get orientation of a line, using its length
+        https://en.wikipedia.org/wiki/Atan2
+        '''
+        orientation = math.atan2(abs((line[0] - line[2])), abs((line[1] - line[3])))
+        return math.degrees(orientation)
+
+    def checker(self, line_new, groups, min_distance_to_merge, min_angle_to_merge):
+        '''Check if line have enough distance and angle to be count as similar
+        '''
+        for group in groups:
+            # walk through existing line groups
+            for line_old in group:
+                # check distance
+                if self.get_distance(line_old, line_new) < min_distance_to_merge:
+                    # check the angle between lines
+                    orientation_new = self.get_orientation(line_new)
+                    orientation_old = self.get_orientation(line_old)
+                    # if all is ok -- line is similar to others in group
+                    if abs(orientation_new - orientation_old) < min_angle_to_merge:
+                        group.append(line_new)
+                        return False
+        # if it is totally different line
+        return True
+
+    def DistancePointLine(self, point, line):
+        """Get distance between point and line
+        http://local.wasp.uwa.edu.au/~pbourke/geometry/pointline/source.vba
+        """
+        px, py = point
+        x1, y1, x2, y2 = line
+
+        def lineMagnitude(x1, y1, x2, y2):
+            'Get line (aka vector) length'
+            lineMagnitude = math.sqrt(math.pow((x2 - x1), 2) + math.pow((y2 - y1), 2))
+            return lineMagnitude
+
+        LineMag = lineMagnitude(x1, y1, x2, y2)
+        if LineMag < 0.00000001:
+            DistancePointLine = 9999
+            return DistancePointLine
+
+        u1 = (((px - x1) * (x2 - x1)) + ((py - y1) * (y2 - y1)))
+        u = u1 / (LineMag * LineMag)
+
+        if (u < 0.00001) or (u > 1):
+            #// closest point does not fall within the line segment, take the shorter distance
+            #// to an endpoint
+            ix = lineMagnitude(px, py, x1, y1)
+            iy = lineMagnitude(px, py, x2, y2)
+            if ix > iy:
+                DistancePointLine = iy
+            else:
+                DistancePointLine = ix
+        else:
+            # Intersecting point is on the line, use the formula
+            ix = x1 + u * (x2 - x1)
+            iy = y1 + u * (y2 - y1)
+            DistancePointLine = lineMagnitude(px, py, ix, iy)
+
+        return DistancePointLine
+
+    def get_distance(self, a_line, b_line):
+        """Get all possible distances between each dot of two lines and second line
+        return the shortest
+        """
+        dist1 = self.DistancePointLine(a_line[:2], b_line)
+        dist2 = self.DistancePointLine(a_line[2:], b_line)
+        dist3 = self.DistancePointLine(b_line[:2], a_line)
+        dist4 = self.DistancePointLine(b_line[2:], a_line)
+
+        return min(dist1, dist2, dist3, dist4)
+
+    def merge_lines_pipeline_2(self, lines):
+        'Clusterize (group) lines'
+        groups = []  # all lines groups are here
+        # Parameters to play with
+        min_distance_to_merge = 30
+        min_angle_to_merge = 30
+        # first line will create new group every time
+        groups.append([lines[0]])
+        # if line is different from existing gropus, create a new group
+        for line_new in lines[1:]:
+            if self.checker(line_new, groups, min_distance_to_merge, min_angle_to_merge):
+                groups.append([line_new])
+
+        return groups
+
+    def merge_lines_segments1(self, lines):
+        """Sort lines cluster and return first and last coordinates
+        """
+        orientation = self.get_orientation(lines[0])
+
+        # special case
+        if(len(lines) == 1):
+            return [lines[0][:2], lines[0][2:]]
+
+        # [[1,2,3,4],[]] to [[1,2],[3,4],[],[]]
+        points = []
+        for line in lines:
+            points.append(line[:2])
+            points.append(line[2:])
+        # if vertical
+        if 45 < orientation < 135:
+            #sort by y
+            points = sorted(points, key=lambda point: point[1])
+        else:
+            #sort by x
+            points = sorted(points, key=lambda point: point[0])
+
+        # return first and last point in sorted group
+        # [[x,y],[x,y]]
+        return [points[0], points[-1]]
+
+    def process_lines(self, lines, img):
+        '''Main function for lines from cv.HoughLinesP() output merging
+        for OpenCV 3
+        lines -- cv.HoughLinesP() output
+        img -- binary image
+        '''
+        lines_x = []
+        lines_y = []
+        # for every line of cv2.HoughLinesP()
+        for line_i in [l[0] for l in lines]:
+                orientation = self.get_orientation(line_i)
+                # if vertical
+                if 45 < orientation < 135:
+                    lines_y.append(line_i)
+                else:
+                    lines_x.append(line_i)
+
+        lines_y = sorted(lines_y, key=lambda line: line[1])
+        lines_x = sorted(lines_x, key=lambda line: line[0])
+        merged_lines_all = []
+
+        # for each cluster in vertical and horizantal lines leave only one line
+        for i in [lines_x, lines_y]:
+                if len(i) > 0:
+                    groups = self.merge_lines_pipeline_2(i)
+                    merged_lines = []
+                    for group in groups:
+                        merged_lines.append(self.merge_lines_segments1(group))
+
+                    merged_lines_all.extend(merged_lines)
+
+        return merged_lines_all
+
+
 

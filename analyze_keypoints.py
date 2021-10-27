@@ -158,7 +158,7 @@ class Keypoints:
         move_match = []
         if self.border is None:
           border_shape, self.border = real_map_border(self.img)
-        print("border:", self.border)
+        # print("border:", self.border)
         # print("num matches: ", len(good_matches))
         for i,kpm in enumerate(good_matches):
           # print("queryIdx:", kpm[0].queryIdx, kpm[1].queryIdx)
@@ -168,7 +168,7 @@ class Keypoints:
           # print("kp1t:",self.keypoints[kpm[0].queryIdx].pt)
           # print("kp2q:",KP2.keypoints[kpm[1].trainIdx].pt)
           # print("dist:", kpm[0].distance, kpm[1].distance)
-          print("kpm:", kpm)
+          # print("kpm:", kpm)
           ((queryIdx, trainIdx, dist), (n_queryIdx, n_trainIdx, n_dist), ratio) = kpm
           kp1 = self.keypoints[queryIdx]
           kp2 = KP2.keypoints[n_trainIdx]
@@ -188,7 +188,7 @@ class Keypoints:
               continue
             elif (action == "RIGHT" and 
                 (abs(kp1.pt[h] - kp2.pt[h]) > abs(kp1.pt[w] - kp2.pt[w]) or kp1.pt[w] <= kp2.pt[w])):
-              print("Right assert: KP fails", kp1.pt, kp2.pt)
+              # print("Right assert: KP fails", kp1.pt, kp2.pt)
               continue
             if action in ["LEFT", "RIGHT"]:
               rads = rad_isosceles_triangle(kp1.pt, rl, kp2.pt)
@@ -197,7 +197,7 @@ class Keypoints:
               angle_match = angle_match_count(angle_match, rads, self.cfg.RADIAN_THRESH)
             if action in ["FORWARD"]:
               if abs(kp1.pt[w] - kp2.pt[w]) > 20 or kp1.pt[h] >= kp2.pt[h]:
-                print("FWD assert: KP fails", kp1.pt, kp2.pt)
+                # print("FWD assert: KP fails", kp1.pt, kp2.pt)
                 continue
             elif action in ["REVERSE"]:
               if abs(kp1.pt[w] - kp2.pt[w]) > 20 or kp1.pt[h] <= kp2.pt[h]:
@@ -209,9 +209,11 @@ class Keypoints:
               move_match = move_match_count(move_match, pix_moved, 2)
           else:
             if not point_in_border(self.border,kp1.pt):
-              print("kp1 point not in border", kp1.pt)
+              # print("kp1 point not in border", kp1.pt)
+              pass
             if not point_in_border(self.border,kp2.pt):
-              print("kp2 point not in border", kp2.pt)
+              # print("kp2 point not in border", kp2.pt)
+              pass
 
         if action in ["LEFT", "RIGHT"] and len(angle_match) >= 1:
           # was: return best count; now: return list for mse eval 
@@ -325,6 +327,8 @@ class Keypoints:
       good = []
       notsogood = []
       for m,n in matches:
+          if n.distance == 0:
+            continue
           d = m.distance/n.distance
           if m.distance < 0.75*n.distance:
               good.append(((m.queryIdx, m.trainIdx, m.distance), (n.queryIdx, n.trainIdx, n.distance), d))

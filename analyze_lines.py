@@ -24,6 +24,7 @@ class LineAnalysis():
     def evaluate_lines_in_image(self, image, border):
       linesP, imglinesp = self.cvu.get_lines(image)
       # print("border:", border)
+      max_num_lines = 10
       lines = []
       line = {}
       for i, [[l0,l1,l2,l3]] in enumerate(linesP):
@@ -37,7 +38,18 @@ class LineAnalysis():
         line["len"] = np.sqrt(dx**2 + dy**2)
         line["slope"] = rad_arctan2(dx, dy)
         line["intersect"] = []
-        lines.append(line.copy())
+        # limit to top X longest lines
+        min_len = self.cfg.INFINITE
+        min_len_num = self.cfg.INFINITE
+        if len(lines) < max_num_lines:
+          lines.append(line.copy())
+        else:
+          for ln_num, ln in enumerate(lines):
+            if min_len > ln["len"]:
+              min_len_num = ln_num
+              min_len = ln["len"]
+          if min_len < line["len"]:
+            lines[min_len_num] = line.copy()
 
       for i,i_line in enumerate(lines):
         [l0,l1,l2,l3] = i_line["line"] 
@@ -92,7 +104,7 @@ class LineAnalysis():
           return offset_h
 
       def offset_h_intersect(offset_match, pt1, pt2):
-          offset_h = pt1[0] - p2[0]
+          offset_h = pt1[0] - pt2[0]
           offset_h_match_count(offset_match, offset_h)
           return offset_h
 
@@ -106,12 +118,15 @@ class LineAnalysis():
 
       confidence = 1
       radian_thresh = self.cfg.RADIAN_THRESH
+      I_intersect_rads = None 
+      J_intersect_rads = None
       if self.color_quant_num_clust is not None:
         minK = self.color_quant_num_clust
         maxK = self.color_quant_num_clust
       else:
         minK = 3
         maxK = 6
+      print("minK maxK", minK, maxK)
       comparison = {}
       for K in range(minK, maxK):
         border_shape, border = real_map_border(prev_map)
@@ -124,7 +139,10 @@ class LineAnalysis():
         comparison["line_rads"] = []
         # Phase 2: across 2 images, make full comparison of 
         #          angles of intersections and line slopes
+        floor_clusters = cm_floor_clusters.copy()
         for cm_i, cm_line in enumerate(cm):
+          cv2.line(floor_clusters, (cm_line["line"][0], cm_line["line"][1]), (cm_line["line"][2], cm_line["line"][3]), (0,255,0), 3, cv2.LINE_AA)
+
           for pm_i, pm_line in enumerate(pm):
             # 
             #-- compare intersections
@@ -140,6 +158,8 @@ class LineAnalysis():
             #   - todo: determine multiple cm lines map to same pm line 
             #   - todo: determine multiple pm lines map to same cm line 
             # todo: bad_match
+        cv2.imshow("floor lines", floor_clusters)
+        # cv2.waitKey(0)
 
         # Phase 3: match lines
         print("intersect_rads, line_rads:", comparison["intersect_rads"], comparison["line_rads"])
@@ -150,22 +170,31 @@ class LineAnalysis():
           for j, j_list in enumerate(comparison["intersect_rads"]):
             if i >= j:
               continue
+            if I_intersect_rads is None or J_intersect_rads is None:
+              continue
             J_cm_i, J_pm_i, J_cm_pt, J_pm_pt, J_intersect_rads = j_list
             # compare the differences in slope, not the slopes themselves
             if rad_interval(I_intersect_rads, J_intersect_rads) <= radian_thresh:
               print("good intersect match:",I_intersect_rads, J_intersect_rads, I_cm_i, J_cm_i, I_pm_i, J_pm_i)
               angle_match = angle_match_count(angle_match, I_intersect_rads, radian_thresh)
-              offset_h = offset_h_intersect(J_cm_pt, J_pm_pt)
+              offset_h = offset_h_intersect(offset_match, J_cm_pt, J_pm_pt)
             # else:
             #  print("bad intersect match:",I_intersect_rads, J_intersect_rads)
           for j, [J_cm_i, J_pm_j, J_rads] in enumerate(comparison["line_rads"]):
             if i >= j:
               continue
+            if I_intersect_rads is None or J_rads is None:
+              continue
+            if len(cm[J_cm_i]["intersect"]) == 0 or len(pm[J_pm_j]["intersect"]) == 0:
+              continue
             j_rads = j_list[2]
             if rad_interval(I_intersect_rads, J_rads) <= radian_thresh:
-              print("good intersect-slope match:",I_intersect_rads, J_rads, I_cm_i, J_cm_i, J_pm_j, I_pm_i)
+              print("good intersect-slope match:",I_intersect_rads, J_rads, I_cm_i, J_cm_i, J_pm_j, I_pm_i,  cm[J_cm_i], pm[J_pm_j])
+
               angle_match = angle_match_count(angle_match, I_intersect_rads, radian_thresh)
-              offset_h = offset_h_intersect(cm[J_cm_i], pm[J_pm_j])
+              [tmp_i1,tmp_j1, cm_pt1] = cm[J_cm_i]["intersect"][0]
+              [tmp_i2,tmp_j2, pm_pt2] = pm[J_pm_j]["intersect"][0]
+              offset_h = offset_h_intersect(offset_match, cm_pt1, pm_pt2)
             # else:
             #   print("bad intersect match:",I_intersect_rads, J_rads)
         for i, [I_cm_i, I_pm_j, I_rads] in enumerate(comparison["line_rads"]):
@@ -174,11 +203,17 @@ class LineAnalysis():
               continue
             if I_cm_i == J_cm_i and I_pm_j == J_pm_j:
               continue
+            if I_rads is None or J_rads is None:
+              continue
             # this is a delta slope, but it doesn't need to be less than radian thresh.
             # the lines should be verified to be the same based on location, length, and slope.
             # Ideally the slope would be similar to pevious turn in same direction.
             if rad_interval(I_rads, J_rads) <= radian_thresh:
               print("good slope match:",I_rads, J_rads, I_cm_i, I_pm_j, J_cm_i, J_pm_j)
+# good slope match: 0.1853479499956947 0.18426569933597836 22 54 236 77
+#                                                                J_cm_i
+
+
               angle_match = angle_match_count(angle_match, I_rads, radian_thresh)
               cmln = cm[I_cm_i]["line"]
               pmln = pm[J_pm_j]["line"]
@@ -234,12 +269,12 @@ class LineAnalysis():
         self.color_quant_num_clust = K
         self.last_line = map_line
         print("longest line",map_line)
-        if frame_num >= self.stop_at_frame:
+        if frame_num >= 180:
           cv2.line(floor_clusters, (map_line[0], map_line[1]), (map_line[2], map_line[3]), (0,255,0), 3, cv2.LINE_AA)
           pt = [int(self.robot_location[1]), int(self.robot_location[0])] # circle uses [w,h]
           imglinesp = cv2.circle(floor_clusters,pt,3,(255,0,0),-1)
-          # cv2.imshow("best map line", floor_clusters);
-          # cv2.imshow("all map lines", imglinesp);
+          # cv2.imshow("best map line", floor_clusters)
+          # cv2.imshow("all map lines", imglinesp)
           # cv2.waitKey(0)
         return map_line, map_slope, max_dist
       return None, None, None

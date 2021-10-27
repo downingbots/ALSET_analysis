@@ -8,9 +8,9 @@ import numpy as np
 #########################
 def add_border(img, bordersize):
     print("bordersize:", bordersize, img.shape[:2])
-    height, width = img.shape[:2]
-    bottom = img[height-2:width, 0:width]
-    mean = cv2.mean(bottom)[0]
+    # height, width = img.shape[:2]
+    # bottom = img[height-2:width, 0:width]
+    # mean = cv2.mean(bottom)[0]
     border = cv2.copyMakeBorder(
         img,
         top=bordersize,
@@ -26,26 +26,25 @@ def add_border(img, bordersize):
 def replace_border(img, desired_height, desired_width, offset_height, offset_width):
     shape, border = real_map_border(img)
     maxw, minw, maxh, minh = get_min_max_borders(border)
-    # maxh, minh, maxw, minw = get_min_max_borders(border)
     print("maxh, minh, maxw, minw :", maxh, minh, maxw, minw, desired_height, desired_width, offset_height, offset_width)
     extract_img_rect = img[minh:maxh, minw:maxw]
-    # extract_img_rect = img[minw:maxw, minh:maxh]
     extract_height, extract_width = extract_img_rect.shape[:2]
     insert_height = int(extract_height + 2*abs(offset_height))
     insert_width  = int(extract_width + 2*abs(offset_width))
     insert_img_rect = np.zeros((insert_height,insert_width,3),dtype="uint8")
     print("ext_h, ins_h, off_h:", extract_height, insert_height, offset_height)
+
     for eh in range(extract_height):
       for ew in range(extract_width):
         new_w = ew + abs(offset_width) + offset_width
         new_h = eh + abs(offset_height) + offset_height
         insert_img_rect[new_h, new_w] = extract_img_rect[eh,ew]
+
     border_top = int((desired_height - insert_height)/2)   
     border_bottom = desired_height - border_top - insert_height
     border_left = int((desired_width - insert_width)/2) 
     border_right = desired_width - border_left - insert_width 
     print("replace_border:",border_top, border_bottom, border_left, border_right, offset_height, offset_width)
-    # replace_border: -2355 -2355 674 675 3014 0
     bordered_img = cv2.copyMakeBorder(
         insert_img_rect,
         top=border_top,
@@ -109,7 +108,6 @@ def middle_angle(pt1, angle_pt, pt2):
 
   # print("compare angles:", rad_angle, rad_angle2)
   return rad_angle2
-
 
 def real_map_border(mapimg, ret_outside=True):
     # convert the stitched image to grayscale and threshold it
@@ -190,6 +188,81 @@ def get_min_max_borders(border):
     # minx, miny, maxx, maxy
     # return int(maxh), int(minh), int(maxw), int(minw)
 
+def rm_top_border(img):
+    all_zero_row = np.where(~img.any(axis = 1))[0]
+    print("all_zero_row:", all_zero_row)
+    top_border = 0
+    rgb_dim = 0
+    for i in all_zero_row:
+      if top_border == i:
+        if rgb_dim >= 2:
+          rgb_dim = 0
+          top_border += 1
+        else:
+          rgb_dim += 1
+        continue
+      break
+    new_img = np.zeros((img.shape[0]-top_border,img.shape[1],3), dtype = "uint8")
+    new_img[:,:,:] = img[top_border:,:,:]
+    return new_img
+
+def rm_borders(img):
+    all_zero_row = np.where(~img.any(axis = 1))[0]
+    print("all_zero_row:", all_zero_row)
+    top_border = 0
+    rgb_dim = 0
+    for i in all_zero_row:
+      if top_border == i:
+        if rgb_dim >= 2:
+          rgb_dim = 0
+          top_border += 1
+        else:
+          rgb_dim += 1
+        continue
+      break
+    bot_border = img.shape[0]-1
+    rgb_dim = 0
+    for i in reversed(all_zero_row):
+      if bot_border == i:
+        if rgb_dim >= 2:
+          rgb_dim = 0
+          bot_border -= 1
+        else:
+          rgb_dim += 1
+        continue
+      break
+    all_zero_col = np.where(~img.any(axis = 0))[0]
+    print("all_zero_col:", all_zero_col)
+    left_border = 0
+    rgb_dim = 0
+    for i in all_zero_col:
+      if left_border == i:
+        if rgb_dim >= 2:
+          rgb_dim = 0
+          left_border += 1
+        else:
+          rgb_dim += 1
+        continue
+      break
+    right_border = img.shape[1]-1
+    rgb_dim = 0
+    for i in reversed(all_zero_col):
+      if right_border == i:
+        if rgb_dim >= 2:
+          rgb_dim = 0
+          right_border -= 1
+        else:
+          rgb_dim += 1
+        continue
+      break
+    print("no img border:", top_border, bot_border, left_border, right_border)
+
+    new_img = np.zeros((img.shape[0]-top_border-(img.shape[0]-bot_border),img.shape[1]-left_border-(img.shape[1]-right_border),3), dtype = "uint8")
+    new_img[:,:,:] = img[top_border:bot_border,left_border:right_border,:]
+    return new_img
+
+
+
 def border_to_polygon(border, bufzone=0):
     b = []
     for bdr in border:
@@ -243,71 +316,83 @@ def image_around_center(map, center, radius):
 
 def intersect_borders(border1,border2):
     dbg = False
+    # dbg = True
+    #
+    # special-case the trapazoid answer
+    # if (len(border1) == 4 and len(border2)==4):
+    #   pass  # todo <no longer necessary due to bug fix>
     poly1 = border_to_polygon(border1)
     poly2 = border_to_polygon(border2)
-    intersect = poly1.intersection(poly2)
-    max_area = 0
-    if intersect.type=='MultiPolygon':
-      # for x in geo.geom:
-      # for x in intersect.geom:
-      if dbg:
-        print("intersect:", intersect)
-      for x in intersect:
-        b = []
-        b2 = []
-        coordslist = list(x.exterior.coords)
-        for pt in coordslist[:]:
-            if dbg:
-              print("i.e.c2", pt)
-            b.append([[int(pt[0]), int(pt[1])]])
-            b2.append([int(pt[0]), int(pt[1])])
-
-        for interior in x.interiors:
-          for pt in interior.coords[:]:
-            # if dbg:
-            print("i.i.c3", pt)
-            b.append([[int(pt[0]), int(pt[1])]])
-            b2.append([int(pt[0]), int(pt[1])])
-
-        print("coords",b)
-        if len(b) == 0:
-          if dbg:
-            print("no intersection between borders:")
-            print("map1 border", border1)
-            print("map2 border", border2)
-        else:
-          area = Polygon(b2).area
-          if dbg:
-              print("intersect area", area)
-          if area > max_area:
-            max_area = area
-            max_b = b.copy()
-    else:
+    try:
+    # if True:
+      intersect = poly1.intersection(poly2)
+      max_area = 0
+      if intersect.type=='MultiPolygon':
+        # for x in geo.geom:
+        # for x in intersect.geom:
         if dbg:
-          # print("intersection of maps", intersect.exterior.coords[:])
-          print("intersection of maps", intersect.interiors[0].coords[:])
-        b = []
-        b2 = []
-        for pt in intersect.exterior.coords[:]:
-            # print("i.e.c", pt)
-            b.append([[int(pt[0]), int(pt[1])]])
-            b2.append([int(pt[0]), int(pt[1])])
-        for interior in intersect.interiors:
-          for pt in interior.coords[:]:
-            print("i.i.c", pt)
-            b.append([[int(pt[0]), int(pt[1])]])
-            b2.append([int(pt[0]), int(pt[1])])
-        print("i.e.c",b)
-        if len(b) == 0:
+          print("intersect:", intersect)
+        for x in intersect:
+          b = []
+          b2 = []
+          coordslist = list(x.exterior.coords)
+          for pt in coordslist[:]:
+              if dbg:
+                print("i.e.c2", pt)
+              b.append([[int(pt[0]), int(pt[1])]])
+              b2.append([int(pt[0]), int(pt[1])])
+  
+          for interior in x.interiors:
+            for pt in interior.coords[:]:
+              # if dbg:
+              print("i.i.c3", pt)
+              b.append([[int(pt[0]), int(pt[1])]])
+              b2.append([int(pt[0]), int(pt[1])])
+  
+          print("coords",b)
+          if len(b) == 0:
+            if dbg:
+              print("no intersection between borders:")
+              print("map1 border", border1)
+              print("map2 border", border2)
+          else:
+            area = Polygon(b2).area
+            if dbg:
+                print("intersect area", area)
+            if area > max_area:
+              max_area = area
+              max_b = b.copy()
+      else:
+          print("intersect.type:", intersect.type)
           if dbg:
-            print("no intersection between borders:")
-            print("map1 border", border1)
-            print("map2 border", border2)
-        else:
-          area = Polygon(b2).area
-          if dbg:
-            print("i.e.c. area", area)
-        max_b = b
+            print("intersection of maps", intersect.exterior.coords[:])
+            # print("intersection of maps", intersect.interiors[0].coords[:])
+            pass
+          b = []
+          b2 = []
+          for pt in intersect.exterior.coords[:]:
+              # print("i.e.c", pt)
+              b.append([[int(pt[0]), int(pt[1])]])
+              b2.append([int(pt[0]), int(pt[1])])
+          for interior in intersect.interiors:
+            for pt in interior.coords[:]:
+              print("i.i.c", pt)
+              b.append([[int(pt[0]), int(pt[1])]])
+              b2.append([int(pt[0]), int(pt[1])])
+          print("i.e.c",b)
+          if len(b) == 0:
+            if dbg:
+              print("no intersection between borders:")
+              print("map1 border", border1)
+              print("map2 border", border2)
+          else:
+            area = Polygon(b2).area
+            if dbg:
+              print("i.e.c. area", area)
+          max_b = b
+    except Exception as e:
+      print("intersect_borders: ", e)
+      return []
     return max_b
 
 def line_intersect_border(poly, pt1, pt2, ignore_pt, border):
@@ -403,8 +488,8 @@ def line_intersect_border(poly, pt1, pt2, ignore_pt, border):
       return intersect.coords
 
 def rectangle_in_border(border):
-    dbg = False
-    # dbg = True
+    # dbg = False
+    dbg = True
     poly = border_to_polygon(border)
     try:
       minw, minh, maxw, maxh = poly.bounds
@@ -412,6 +497,24 @@ def rectangle_in_border(border):
     except:
       print("no poly bounds:", poly, border)
       return None, None, None, None
+
+    if dbg:
+      print("border:", border)
+    if (len(border) == 4 and border[0][0][0] == border[3][0][0] 
+        and border[0][0][1] == border[3][0][1]):
+      # i.e.c [[[2584, 2758]], [[2640, 2869]], [[2696, 2758]], [[2584, 2758]]]
+      #   3004 2709.0 3004.0 2711.0 
+      # [[[2708, 3004]], [[2710, 3007]], [[2712, 3004]], [[2708, 3004]]]
+
+      # Triangle: find longest side
+      h0 = int(max(border[0][0][1], border[2][0][1]))
+      w0 = int((border[0][0][0]+border[1][0][0]) / 2)
+      h1 = int((border[1][0][1]+h0)/2)
+      w1 = int((border[2][0][0]+border[1][0][0]) / 2)
+      # return min_h, min_w, max_h, max_w 
+      print("rect in triangle: ", h0, w0, h1, w1, border)
+      x = 1/0
+      return h0, w0, h1, w1
 
     max_area = 0
     for bpt in border:
@@ -515,7 +618,7 @@ def image_in_border(border, image):
       bdr = []
       for bpt in border:
         im = cv2.circle(im,bpt[0],3,(255,0,0),-1)
-      cv2.imshow("Image with no rectangle", im)
+      # cv2.imshow("Image with no rectangle", im)
       # cv2.waitKey(0)
       return None
     print("minw, minh, maxw, maxh:", minw, minh, maxw, maxh)

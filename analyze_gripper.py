@@ -2,7 +2,7 @@ import cv2
 from cv_analysis_tools import *
 from analyze_color import *
 from dataset_utils import *
-from cube import *
+# from cube import *
 
 class AnalyzeGripper():
 
@@ -177,8 +177,8 @@ class AnalyzeGripper():
       safe_ground_img[0:sg_maxy-sg_miny, 0:sg_maxx-sg_minx] = image[sg_miny:sg_maxy, sg_minx:sg_maxx]
       gray_sg_img = cv2.cvtColor(safe_ground_img, cv2.COLOR_BGR2GRAY)
 
-      print("Safe Ground BB:", safe_ground_bb)
-      cv2.imshow("Safe Ground", safe_ground_img)
+      # print("Safe Ground BB:", safe_ground_bb)
+      # cv2.imshow("Safe Ground", safe_ground_img)
       # cv2.waitKey(0)
       radius = min(sg_maxx-sg_minx, sg_maxy-sg_miny)
       num_radius = max(int((radius-1) / 6), 2)
@@ -228,7 +228,7 @@ class AnalyzeGripper():
         else:
           # g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
           left_gripper_bounding_box, right_gripper_bounding_box, g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
-          cv2.imshow("Gripper open", g_img)
+          # cv2.imshow("Gripper open", g_img)
           # cv2.waitKey(0)
           if g_img is None:
             print("g_img is None")
@@ -284,7 +284,7 @@ class AnalyzeGripper():
         else:
           # g_img = self.cvu.moved_pixels_over_time(prev_img_path, curr_img_path, init)
           left_gripper_bounding_box, right_gripper_bounding_box, g_img = self.cvu.moved_pixels(prev_img_path, curr_img_path, init)
-          cv2.imshow("Gripper close", g_img)
+          # cv2.imshow("Gripper close", g_img)
           # cv2.waitKey(0)
           if done:
             self.gripper_state = "FULLY_CLOSED"
@@ -348,15 +348,15 @@ class AnalyzeGripper():
               curr_img, mean_dif, rl_bb = self.cvu.adjust_light(curr_img_path)
               # contours, image = self.cvu.unmoved_pixel_contours(g_mean_edges_img, curr_img)
               left_gripper_bounding_box, right_gripper_bounding_box, image = self.cvu.get_gripper_bounding_box(g_mean_edges_img, curr_img)
-              cv2.imshow("mean_gripper_edges", g_mean_edges_img)
-              cv2.imshow("mean_contour", image)
+              # cv2.imshow("mean_gripper_edges", g_mean_edges_img)
+              # cv2.imshow("mean_contour", image)
             if curr_func_name in ["SEARCH_FOR_CUBE", "GOTO_CUBE", "PICK_UP_CUBE", "GOTO_BOX_WITH_CUBE", "DROP_CUBE_IN_BOX"]:
                 obj_nm = self.get_obj_name(curr_func_name)
                 # obj_bounding_box = self.get_object_bounding_box(left_gripper_bounding_box, right_gripper_bounding_box, curr_img)
                 if obj_nm == "CUBE":
                   print("find cube")
                   curr_img, mean_dif, rl_bb = self.cvu.adjust_light(curr_img_path)
-                  find_cube(curr_img)
+                  # find_cube(curr_img)
 
             if action == "FORWARD":
                 # prev_img is pre-FORWARD ; curr_img is post-FORWARD 
