@@ -261,7 +261,10 @@ def rm_borders(img):
     new_img[:,:,:] = img[top_border:bot_border,left_border:right_border,:]
     return new_img
 
-
+def bounding_box_center(bb):
+    bb_p = border_to_polygon(bb)
+    center = [bb_p.centroid.x,bb_p.centroid.y]
+    return center
 
 def border_to_polygon(border, bufzone=0):
     b = []
@@ -488,8 +491,8 @@ def line_intersect_border(poly, pt1, pt2, ignore_pt, border):
       return intersect.coords
 
 def rectangle_in_border(border):
-    # dbg = False
-    dbg = True
+    dbg = False
+    # dbg = True
     poly = border_to_polygon(border)
     try:
       minw, minh, maxw, maxh = poly.bounds

@@ -1,19 +1,18 @@
 import cv2
 from cv_analysis_tools import *
-from analyze_color import *
+from analyze_texture import *
 from dataset_utils import *
 # from cube import *
 
 class AnalyzeGripper():
 
-  def __init__(self):
+  def __init__(self, alset_state):
       self.stop_at_frame = 117
       self.gripper_img = None
       self.prev_frame_num = -1
       self.prev_action = ""
       self.background = None
       self.threshold = 10
-      self.gripper_history = []
       self.gripper_open_cnt = 0
       self.gripper_close_cnt = 0
       self.gripper_state = "UNKNOWN"
@@ -22,6 +21,7 @@ class AnalyzeGripper():
       self.gripper_open_image = 0
       self.fully_open_cnt = None
       self.fully_closed_cnt = None
+      self.alset_state = alset_state
       self.add_edges = False   # didn't seem to add much, if anything
       self.cvu = CVAnalysisTools()
       self.cfg = Config()
@@ -92,10 +92,7 @@ class AnalyzeGripper():
       # cv2.imshow("gripper_contours", image)
       # cv2.waitKey(0)
 
-  def save_gripper_pos_info(self):
-      # TODO
-      pass
-
+  # not really used
   def get_gripper_pos_info(self):
       if self.gripper_state == "UNKNOWN":
         return None
@@ -107,6 +104,7 @@ class AnalyzeGripper():
         self.gripper_state_values[self.gripper_close_cnt].append({})
       return self.gripper_state_values[self.gripper_close_cnt][self.gripper_open_cnt]
 
+  # not really used
   def set_gripper_pos_info(self, key, value):
       if self.gripper_state == "UNKNOWN":
         print("set_gripper_pos_info called in UNKNOWN state")
@@ -152,19 +150,16 @@ class AnalyzeGripper():
       # typically arm should be parked.
       # left_bb = [[[0, miny]],[[0, y-1]], [[lmaxx, y-1]], [[lmaxx, miny]]]
       # right_bb = [[[minx, miny]],[[x-1, miny]], [[x-1, y-1]],[[minx, y-1]]]
-
-
 #      minK = 3
 #      maxK = 6
 #      for K in range(minK, maxK):
 #        pm_floor_clusters = self.cvu.color_quantification(image, K)
-
-
       image, mean_dif, rl_bb = self.cvu.adjust_light(image_path)
       sg_minx = lg_bb[2][0][0]+1
       sg_maxx = rg_bb[0][0][0]-1 
       sg_miny = max(lg_bb[0][0][1], rg_bb[0][0][1])
       sg_maxy = lg_bb[1][0][1]
+      # if sg_maxx - sg_minx < 10 or sg_maxy - sg_miny < 10:
       if sg_maxx - sg_minx < 50 or sg_maxy - sg_miny < 50:
         print("No Safe Ground:", sg_minx, sg_maxx, sg_miny, sg_maxy)
         return [None, None, None]
@@ -182,16 +177,16 @@ class AnalyzeGripper():
       # cv2.waitKey(0)
       radius = min(sg_maxx-sg_minx, sg_maxy-sg_miny)
       num_radius = max(int((radius-1) / 6), 2)
-      safe_ground_lbp = []
-      for rad in range(1,(radius-1), num_radius):
-        safe_ground_lbp.append(LocalBinaryPattern(gray_sg_img, rad))
+      # safe_ground_lbp = []
+      # for rad in range(1,(radius-1), num_radius):
+        # safe_ground_lbp.append(LocalBinaryPattern(gray_sg_img, rad))
       # ARD: TODO: move lbp results to cluster analysis
       #            make a lbp catalog of safe ground
-      return [safe_ground_bb, safe_ground_img, safe_ground_lbp]
+      self.alset_state.record_drivable_ground(safe_ground_bb, safe_ground_img)
+      return [safe_ground_bb, safe_ground_img]
 
   def analyze(self, frame_num, action, prev_img_path, curr_img_path, done=False, curr_func_name=None):
       left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info = [],[],[None]
-      save = False 
       if self.gripper_open_cnt == 0 and self.gripper_close_cnt == 0:
         init = True
       else:
@@ -287,6 +282,7 @@ class AnalyzeGripper():
           # cv2.imshow("Gripper close", g_img)
           # cv2.waitKey(0)
           if done:
+            # Problem: if picking up cube, done may not indicate a fully closed state
             self.gripper_state = "FULLY_CLOSED"
             self.set_gripper_pos_info("FULLY_CLOSED_IMG", g_img)
             print("FULLY_CLOSED: done")
@@ -361,6 +357,8 @@ class AnalyzeGripper():
             if action == "FORWARD":
                 # prev_img is pre-FORWARD ; curr_img is post-FORWARD 
                 safe_ground_info = self.get_safe_ground(left_gripper_bounding_box, right_gripper_bounding_box, None, prev_img_path)
+                if safe_ground_info[0] is not None:
+                  self.alset_state.record_bounding_box(["DRIVABLE_GROUND"], safe_ground_info[0]) 
             self.set_gripper_pos_info("MEAN_EDGES", g_mean_edges)
             self.set_gripper_pos_info("MEAN_EDGES_IMG", g_mean_edges_img)
             self.set_gripper_pos_info("EDGES", g_edges)
@@ -375,20 +373,44 @@ class AnalyzeGripper():
 #      else:
 #        print("4 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
 #        print("4 prev_frame, frame, prev_action, action:", self.prev_frame_num, frame_num, self.prev_action, action)
-#        save = True 
         # self.gripper_open_cnt = 0
         # self.gripper_close_cnt = 0
 
-      if save or done:
-        # todo: store the state in "gri
-        self.save_gripper_pos_info()
-        self.gripper_history.append([self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state])
-        print("6 gripper state: ", self.prev_frame_num, self.gripper_open_cnt, self.gripper_close_cnt, self.gripper_state)
       self.prev_frame_num = frame_num
       self.prev_action = action
       # gripper contour and edges do worse than pixel movements (averaged/overlapped).
       # self.gripper_contours(curr_img_path)
       # self.gripper_edges(curr_img_path)
+      self.alset_state.record_gripper_state(self.gripper_state, self.gripper_open_cnt, self.gripper_close_cnt)
+
+      # list of potential gripper labels:
+      # "RIGHT_GRIPPER_OPEN", "RIGHT_GRIPPER_CLOSED", "LEFT_GRIPPER_OPEN",
+      # "LEFT_GRIPPER_CLOSED", "RIGHT_GRIPPER_C_X_Y", "LEFT_GRIPPER",
+      # "RIGHT_GRIPPER", "PARKED_GRIPPER", "GRIPPER_WITH_CUBE", "DROP_CUBE"
+      if self.gripper_state in ["FULLY_OPEN"]:
+        left_labels = ["LEFT_GRIPPER","LEFT_GRIPPER_OPEN"]
+        right_labels = ["RIGHT_GRIPPER","RIGHT_GRIPPER_OPEN"]
+      elif self.gripper_state in ["FULLY_CLOSED"]:
+        left_labels = ["LEFT_GRIPPER","LEFT_GRIPPER_CLOSED"]
+        right_labels = ["RIGHT_GRIPPER","RIGHT_GRIPPER_CLOSED"]
+      elif self.gripper_state in ["PARTIALLY_OPEN"]:
+        left_labels = ["LEFT_GRIPPER",f'LEFT_GRIPPER_O_{self.gripper_open_cnt}_{self.gripper_close_cnt}']
+        right_labels = ["RIGHT_GRIPPER",f'RIGHT_GRIPPER_O_{self.gripper_open_cnt}_{self.gripper_close_cnt}']
+      elif self.gripper_state in ["PARTIALLY_CLOSED"]:
+        left_labels = ["LEFT_GRIPPER",f'LEFT_GRIPPER_C_{self.gripper_open_cnt}_{self.gripper_close_cnt}']
+        right_labels = ["RIGHT_GRIPPER",f'RIGHT_GRIPPER_C_{self.gripper_open_cnt}_{self.gripper_close_cnt}']
+      elif self.gripper_state.startswith("UNKNOWN"):
+        left_labels = ["LEFT_GRIPPER"]
+        right_labels = ["RIGHT_GRIPPER"]
+        
+      # Computed later using post-analysis;
+      #   "PARKED_GRIPPER", "GRIPPER_WITH_CUBE", "DROP_CUBE"
+      #   self.robot_state["KNOWN_STATE"] == "PARK_ARM_RETRACTED"
+      if len(left_gripper_bounding_box) == 4:
+        self.alset_state.record_bounding_box(left_labels, left_gripper_bounding_box) 
+      if len(right_gripper_bounding_box) == 4:
+        self.alset_state.record_bounding_box(right_labels, right_gripper_bounding_box) 
+      # note: safe_ground_info recorded by self.get_drivable_ground()
       return [left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info[0]]
 
   def check_cube_in_gripper(self, frame_num, action, prev_img_path, curr_img_path, done):

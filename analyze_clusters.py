@@ -13,7 +13,8 @@ from skimage.feature import *
 
 class AnalyzeClusters():
 
-  def __init__(self):
+  def __init__(self, alset_state):
+      self.alset_state = alset_state
       self.cluster = {}
       self.KP = None
       # store the number of points and radius
@@ -23,147 +24,6 @@ class AnalyzeClusters():
       self.display_lbp = False
       # example color reference:
       #   'brick': local_binary_pattern(brick, self.n_points, self.radius, METHOD)
-
-
-  # plot the color histograms using opencv 
-  def show_color_histogram(self, image):
-      for i, col in enumerate(['b', 'g', 'r']):
-          hist = cv2.calcHist([image], [i], None, [256], [0, 256])
-          plt.plot(hist, color=col)
-          plt.xlim([0, 256])
-      plt.show()
-
-  #########################
-  # settings for Local Binary Pattern : color analysis
-  
-  # a measure of histogram distributions 
-  def kullback_leibler_divergence(p, q):
-      p = np.asarray(p)
-      q = np.asarray(q)
-      filt = np.logical_and(p != 0, q != 0)
-      return np.sum(p[filt] * np.log2(p[filt] / q[filt]))
-  
-  
-  # lbp allows automatic classification and identification of textures.
-  # The patterns are rotation and grayscale invariant.
-  def match(self, refs, img):
-      best_score = 10
-      best_name = None
-      lbp = local_binary_pattern(img, self.n_points, self.radius, METHOD)
-      n_bins = int(lbp.max() + 1)
-      hist, _ = np.histogram(lbp, density=True, bins=n_bins, range=(0, n_bins))
-      for name, ref in refs.items():
-          ref_hist, _ = np.histogram(ref, density=True, bins=n_bins,
-                                     range=(0, n_bins))
-          score = kullback_leibler_divergence(hist, ref_hist)
-          if score < best_score:
-              best_score = score
-              best_name = name
-      return best_name
-  
-  # Local Binary Pattern
-  def get_local_binary_pattern(self, image, eps=1e-7):
-      # compute the Local Binary Pattern representation
-      # of the image, and then use the LBP representation
-      # to build the histogram of patterns
-      # lbp = feature.local_binary_pattern(image, self.n_points,
-
-      # ARD: image lighting should already be normalized
-      lbp = local_binary_pattern(image, self.n_points, self.radius, method="uniform")
-      (hist, _) = np.histogram(lbp.ravel(),
-          bins=np.arange(0, self.n_points + 3),
-          range=(0, self.n_points + 2))
-      # print("lbp shape:", len(lbp), len(lbp[0])) # 224x224
-      if self.display_lbp:
-        cv2.imshow("get LBP image:", lbp)
-
-      # normalize the histogram
-      hist = hist.astype("float")
-      hist /= (hist.sum() + eps)
-
-      # return the histogram of Local Binary Patterns
-      return hist
-
-  def analyze_color(self, refs, img_path):
-      image = cv2.imread(img_path)
-      gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-      hist = self.get_local_binary_pattern(gray)
-      if self.display_lbp:
-        self.show_color_histogram(image)
-
-      (means, stds) = cv2.meanStdDev(image)
-      print("means, stds:", means, stds) # for each RGB channel
-      # Example feature vectors:
-      #   local_binary_pattern
-      #   a vector of R,G,B means, stdev
-      #   stats = np.concatenate([means, stds]).flatten()
-
-      if self.display_lbp:
-        plt.plot(hist,'b-')
-        plt.ylabel('Feature Vectors')
-        plt.show()
-        cv.waitKey(0)
-      return
-  
-      # We want automatically gather and label:
-      #
-      # - Ground:
-      #    - Safe-to-drive ground
-      #    - Avoided ground
-      # - Robot:
-      #     - robot grippers colors
-      #     - robot arm colors (and shapes, if known by movement)
-      #       -- arm position from known parked-point
-      #     - Other robot colors
-      # - Objects:
-      #     - Colors, shape
-      #     - Objects picked up
-      #     - Container objects
-      #       -- Note: a Dump Truck is a container object :-)
-      #       -- Note: a Shovel is a container object :-)
-      #     - Avoided, Desired, Ignored
-      #     - pushable, immovable attributes, drive over, 
-      #     - grabable, pickable
-
-      brick = data.brick()
-      grass = data.grass()
-      gravel = data.gravel()
-      
-      refs = {
-          'brick': local_binary_pattern(brick, n_points, radius, METHOD),
-          'grass': local_binary_pattern(grass, n_points, radius, METHOD),
-          'gravel': local_binary_pattern(gravel, n_points, radius, METHOD)
-      }
-      
-      # classify rotated textures
-      print('Rotated images matched against references using LBP:')
-      print('original: brick, rotated: 30deg, match result: ',
-            match(refs, rotate(brick, angle=30, resize=False)))
-      print('original: brick, rotated: 70deg, match result: ',
-            match(refs, rotate(brick, angle=70, resize=False)))
-      print('original: grass, rotated: 145deg, match result: ',
-            match(refs, rotate(grass, angle=145, resize=False)))
-      
-      # plot histograms of LBP of textures
-      fig, ((ax1, ax2, ax3), (ax4, ax5, ax6)) = plt.subplots(nrows=2, ncols=3,
-                                                             figsize=(9, 6))
-      plt.gray()
-      
-      ax1.imshow(brick)
-      ax1.axis('off')
-      hist(ax4, refs['brick'])
-      ax4.set_ylabel('Percentage')
-      
-      ax2.imshow(grass)
-      ax2.axis('off')
-      hist(ax5, refs['grass'])
-      ax5.set_xlabel('Uniform LBP values')
-      
-      ax3.imshow(gravel)
-      ax3.axis('off')
-      hist(ax6, refs['gravel'])
-      
-      plt.show()
 
   def create_cluster(self, id = None, status = None, centroid = None, 
                kp = None, kp_attr = None, location = None, 
@@ -256,7 +116,6 @@ class AnalyzeClusters():
         plt.axis('off')
         plt.show()
       else:
-        self.analyze_color(None, curr_img_path)
 
         # try color quantification
         Z = curr_img.reshape((-1,3))

@@ -5,9 +5,10 @@ from PIL import Image
 import cv2
 import argparse
 from analyze_keypoints import *
-from analyze_color import *
+from analyze_texture import *
 from analyze_lines import *
 from imutils import paths
+from alset_state import *
 import imutils
 from matplotlib import pyplot as plt
 from cv_analysis_tools import *
@@ -18,11 +19,13 @@ import statistics
 from operator import itemgetter, attrgetter
 from skimage.metrics import structural_similarity as ssim  
 import random
+from alset_ratslam import *
 
 # based on: 
 # https://www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
 class AnalyzeMap():
-    def __init__(self):
+    def __init__(self, alset_state):
+        self.alset_state = alset_state
         # self.stop_at_frame = 114
         self.curr_frame_num = 0
         self.stop_at_frame = 119
@@ -32,28 +35,19 @@ class AnalyzeMap():
         # real map array info
         # real map array sizes change over time
         self.map_overlay = None
-        self.map_height = None
-        self.map_width= None
         #
         self.border_buffer = None   # move_img
-        self.border_multiplier = 2   # move_img
+        self.border_multiplier = 3   # move_img
         # To compute the distances,var of moves
-        self.curr_move_height = None
-        self.curr_move_width = None
         self.curr_move = None
         self.prev_move = None
 
         # the robot starts in the middle of an empty square of VIRTUAL_MAP_SIZE pixels
         # the virtual map locations do not change.
         self.virtual_map_center = None
-        self.robot_length = None
-        self.parked_gripper_left = []
-        self.parked_gripper_right = []
         self.gripper_height = None
         self.gripper_width = None
         self.gripper_offset_height = 0
-        self.grabable_objects = []
-        self.container_objects = []
 
         self.frame_num = 0
         self.color_quant_num_clust = 0
@@ -62,16 +56,46 @@ class AnalyzeMap():
         self.robot_orientation = 0  # starting point in radians
         # need to add borders to find location in map
         self.robot_location = None
+        self.robot_location_history = []
         self.robot_origin = None
         self.robot_location_from_origin = [0,0]  # starting point 
         self.lna = LineAnalysis()
 
+    def load_state():
+        # self.stop_at_frame = 114
+        self.curr_frame_num = 0
+        self.map = None
+        self.map_overlay = None
+        self.map_height = None
+        self.map_width= None
+        #
+        self.border_buffer = None   # move_img
+        self.curr_move = None
+        self.prev_move = None
+
+        self.virtual_map_center = None
+        self.gripper_height = None
+        self.gripper_width = None
+        self.gripper_offset_height = 0
+
+        self.frame_num = 0
+        self.color_quant_num_clust = 0
+        self.robot_orientation = 0  # starting point in radians
+        # need to add borders to find location in map
+        self.robot_location = None
+        self.robot_location_history = []
+        self.robot_origin = None
+
+
+
+    # TODO: make map size be dynamically adjustable size.
     def real_to_virtual_map_coordinates(self, pt):
         self.virtual_map_center = None
         x = pt[0] - self.virtual_map_center[0] + self.cfg.VIRTUAL_MAP_SIZE/2
         y = pt[1] - self.virtual_map_center[1] + self.cfg.VIRTUAL_MAP_SIZE/2
         return x,y
 
+    # TODO: make map size be dynamically adjustable size.
     def virtual_to_real_map_coordinates(self, pts):
         x = pt[0] + self.virtual_map_center[0] - self.cfg.VIRTUAL_MAP_SIZE/2
         y = pt[1] + self.virtual_map_center[1] - self.cfg.VIRTUAL_MAP_SIZE/2
@@ -111,20 +135,20 @@ class AnalyzeMap():
           self.gripper_offset_height = self.gripper_height 
         print("gripper h,w:", self.gripper_height, self.gripper_width)
 
-        self.parked_gripper_left = np.zeros((self.gripper_height, self.gripper_width, 3), dtype=np.uint8)
-        self.parked_gripper_right = np.zeros((self.gripper_height, self.gripper_width, 3), dtype=np.uint8)
+        parked_gripper_left = np.zeros((self.gripper_height, self.gripper_width, 3), dtype=np.uint8)
+        parked_gripper_right = np.zeros((self.gripper_height, self.gripper_width, 3), dtype=np.uint8)
         black = [0, 0, 0]
         # cv2.imshow("full birds_eye_view", birds_eye_view )
         for gw in range(self.gripper_width):
           for gh in range(self.gripper_height):
-            self.parked_gripper_left[self.gripper_height-gh-1,gw] = birds_eye_view[(h+y)-gh-1, gw]
-            self.parked_gripper_right[self.gripper_height-gh-1,self.gripper_width-gw-1] = birds_eye_view[(h+y)-gh-1, new_w-gw-1]
+            parked_gripper_left[self.gripper_height-gh-1,gw] = birds_eye_view[(h+y)-gh-1, gw]
+            parked_gripper_right[self.gripper_height-gh-1,self.gripper_width-gw-1] = birds_eye_view[(h+y)-gh-1, new_w-gw-1]
             birds_eye_view[(h+y)-gh-1, gw] = black
             birds_eye_view[(h+y)-gh-1, new_w-gw-1] = black
         # cv2.imshow("b4", image )
         # cv2.imshow("birds_eye_view", birds_eye_view )
-        # cv2.imshow("left gripper", self.parked_gripper_left )
-        # cv2.imshow("right gripper", self.parked_gripper_right )
+        # cv2.imshow("left gripper", parked_gripper_left )
+        # cv2.imshow("right gripper", parked_gripper_right )
         # cv2.waitKey(0)
         # cv2.destroyAllWindows()
         return birds_eye_view
@@ -297,8 +321,8 @@ class AnalyzeMap():
         pct_w = min(4 * abs(rnm_maxw - mol_maxw) / rnm_maxw, 1)
         pct_h = min(4 * abs(rnm_maxh - mol_maxh) / rnm_maxh, 1)
         intersect_border = intersect_borders(mol_border, rnm_border)
-        print("mol_border:", mol_border)
-        print("rnm_border:", rnm_border)
+        # print("mol_border:", mol_border)
+        # print("rnm_border:", rnm_border)
         if len(intersect_border) == 0:
           print("non-intersecting mol_border:", mol_border)
           print("non-intersecting rnm_border:", rnm_border)
@@ -378,18 +402,19 @@ class AnalyzeMap():
         mse_score,ssim_score = self.compare_images(intersect_mol, intersect_rnm, "compare", mse_only)
         i, tot_lbp_score = 0, 0
         if show_intersect:
-          cv2.imshow("mol", intersect_mol)
-          cv2.imshow("rnm", intersect_rnm)
-          cv2.imshow("full mol", mol)
-          cv2.imshow("full rnm", rnm)
-          cv2.waitKey(0)
+          # cv2.imshow("mol", intersect_mol)
+          # cv2.imshow("rnm", intersect_rnm)
+          # cv2.imshow("full mol", mol)
+          # cv2.imshow("full rnm", rnm)
+          # cv2.waitKey(0)
+          pass
         # print("radius", radius, num_radius)
         if mse_only:
           lbp_score = self.cfg.INFINITE
         else:
           for rad in range(1,(radius-1), num_radius):
-            lbp = LocalBinaryPattern(intersect_mol, rad)
-            lbp_score = lbp.get_score(intersect_rnm)
+            lbp = LocalBinaryPattern()
+            lbp_score = lbp.get_score(intersect_mol, intersect_rnm, rad)
             tot_lbp_score += lbp_score
             i += 1
             # print("lbp: ", i, lbp_score, rad, radius)
@@ -1013,13 +1038,24 @@ class AnalyzeMap():
           box = np.int0(box)
           cv2.drawContours(self.map_overlay,[box],0,(0,0,255),2)
 
+          # draw line segments to represent path
+          startPt = None
+          for loc in self.robot_location_history:
+            if startPt is None:
+              startPt = [loc[1],loc[0]]
+            else:
+              cv2.line(self.map_overlay,startPt,[loc[1],loc[0]],(0,0,255),3,cv2.LINE_AA)
+              startPt = [loc[1],loc[0]]
+
           rotated_robot_rectangle = cv2.circle(self.map_overlay,loc,3,(255,0,0),-1)
-          if self.frame_num >= 300:
-            map_ovrlay_no_brdr = rm_borders(self.map_overlay)
-            scale_factor = .4
-            resized_map = [int(map_ovrlay_no_brdr.shape[1] * scale_factor),
-                           int(map_ovrlay_no_brdr.shape[0] * scale_factor)]
-            map_ovrlay_no_brdr = cv2.resize(map_ovrlay_no_brdr, resized_map)
+          map_ovrlay_no_brdr = rm_borders(self.map_overlay)
+          scale_factor = .4
+          resized_map = [int(map_ovrlay_no_brdr.shape[1] * scale_factor),
+                         int(map_ovrlay_no_brdr.shape[0] * scale_factor)]
+          map_ovrlay_no_brdr = cv2.resize(map_ovrlay_no_brdr, resized_map)
+          self.alset_state.record_map(map_ovrlay_no_brdr)
+          self.alset_state.record_location(self.robot_origin, self.robot_location_from_origin, self.robot_orientation)
+          if self.frame_num >= 400:
             cv2.imshow("trimmed map_overlay", map_ovrlay_no_brdr)
             cv2.waitKey(0)
 
@@ -1052,25 +1088,27 @@ class AnalyzeMap():
         # Initialize map with first frame.
         ###########################
         if self.map is None:
-          self.curr_move_height,self.curr_move_width,ch = self.curr_move.shape
+          curr_move_height,curr_move_width,ch = self.curr_move.shape
           # add a big border
-          self.border_buffer = max(self.curr_move_height,self.curr_move_width)*self.border_multiplier
+          self.border_buffer = max(curr_move_height,curr_move_width)*self.border_multiplier
           print("border buffer:", self.border_buffer)
           self.map = add_border(self.curr_move.copy(), self.border_buffer)
           self.map_overlay = self.map.copy()
-          self.map_height,self.map_width = self.map.shape[:2]
+          map_height,map_width = self.map.shape[:2]
 
           # initialize location
-          self.robot_length = self.cfg.MAP_ROBOT_H_POSE
-          self.robot_origin = [int(self.border_buffer+self.robot_length + self.curr_move_height), int(self.border_buffer + self.curr_move_width/2)]
+          robot_length = self.cfg.MAP_ROBOT_H_POSE
+          self.robot_origin = [int(self.border_buffer+robot_length + curr_move_height), int(self.border_buffer + curr_move_width/2)]
           self.robot_location_from_origin = [0,0]
           self.robot_location = self.robot_origin.copy()
+          self.robot_location_history.append(self.robot_location.copy())
           self.robot_orientation = 0  # starting point in radians
-          print("robot_location:",self.robot_location, self.map_height, self.map_width, self.border_buffer, self.robot_length)
+          print("robot_location:",self.robot_location, map_height, map_width, self.border_buffer, robot_length)
           print("inital orientation: ", self.robot_orientation)
           self.add_robot_to_overlay()
+          self.alset_state.record_map_origin(self.robot_origin)
 
-          self.VIRTUAL_MAP_SIZE = self.border_buffer * 1 + self.map_height
+          self.VIRTUAL_MAP_SIZE = self.border_buffer * 1 + map_height
           self.map_virtual_map_center = self.VIRTUAL_MAP_SIZE / 2
           return 
         else:
@@ -1101,6 +1139,8 @@ class AnalyzeMap():
           if action in ["LEFT", "RIGHT"]:
             if best_angle is not None:
               self.robot_orientation = rad_sum(self.robot_orientation, best_angle)
+              alset_ratslam(curr_image, 0, best_angle)
+              self.alset_state.record_movement(action, 0, best_angle)
           elif action in ["FORWARD", "REVERSE"]:
             # In local map, the robot moves straight up but
             # In global map, the robot orientation factors into robot location
@@ -1109,14 +1149,19 @@ class AnalyzeMap():
               # ARD: var 1
               # pix_w = round(best_move * math.cos(angle))
               # pix_h = round(best_move * math.sin(angle))
+              alset_ratslam(curr_image, -best_move, 0)
               pix_h = round(best_move * math.cos(angle))
               pix_w = round(best_move * math.sin(angle))
+              self.alset_state.record_movement(action, best_move, 0)
             except:
               pix_h = best_move 
               pix_w = 0
+              alset_ratslam(curr_image, -best_move, 0)
+              self.alset_state.record_movement(action, best_move, 0)
             # ARD: var 2
             self.robot_location[0] += int(round(pix_h))
             self.robot_location[1] += int(round(pix_w))
+            self.robot_location_history.append(self.robot_location.copy())
             self.robot_location_from_origin[0] += int(round(pix_h))
             self.robot_location_from_origin[1] += int(round(pix_w))
             # self.robot_location[1] += int(round(pix_h))
@@ -1134,9 +1179,10 @@ class AnalyzeMap():
           rotated_new_map = add_border(self.curr_move.copy(), self.border_buffer)
           rotated_new_map = rotate_about_robot(rotated_new_map, self.robot_orientation, self.robot_origin)
           if self.frame_num >= 300:
-            cv2.imshow("rotated_new_map", rotated_new_map)
-            cv2.imshow("map", self.map)
-            cv2.waitKey(0)
+            # cv2.imshow("rotated_new_map", rotated_new_map)
+            # cv2.imshow("map", self.map)
+            # cv2.waitKey(0)
+            pass
 
 #          # move frame to global robot location
 #          # print("self.robot_location_from_origin", self.robot_location_from_origin, self.gripper_offset_height)

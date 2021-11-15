@@ -11,6 +11,12 @@
 # Dataset indices are stored in files like:
 ##  ./apps/FUNC/dataset_indexes/NN_SEARCH_FOR_CUBE_IDX_YY_MM_DDa.txt
 #
+# Bounding Box are stored in Directories like:
+##  ./apps/BOUNDING_BOXES/left_gripper/BB_2_20_3.jpg
+##  ./apps/BOUNDING_BOXES/<bb_key>/BB_<run_num>_<frame_num>_<bb_idx>_.jpg
+##  jpg files may be symbolic links; a particular BB*.jpg is only stored once.
+##                                        
+# 
 # The dataset for each of the indices are stored in the following directory:
 ##  ./apps/FUNC/dataset
 #
@@ -88,7 +94,7 @@ class DatasetUtils():
     # ./apps/TT_DQN/dataset_indexes/TT_DQN_IDX_YY_MM_DDa.txt
     ## contains multiple images, in order obtained, across actions
     # position in ["NEW","NEXT","OLDEST", "NEWEST", "RANDOM"]
-    def dataset_indices(self, mode="DQN", nn_name=None, position="RANDOM"):
+    def dataset_indices(self, mode="DQN", nn_name=None, position="RANDOM", start_from_idx=None):
         ds_idx_pth = self.dataset_index_path(mode, nn_name) 
         if mode in ["FUNC","FPEN"]:
           # ds_idx_nm = "FUNC_" + nn_name + "_IDX_" 
@@ -107,6 +113,8 @@ class DatasetUtils():
           return self.last_ds_idx
         elif position in ["NEWEST","OLDEST","RANDOM"]:
           full_ds_idx = self.oldest_newest_random_dataset_idx_name(ds_idx_pth, ds_idx_nm, mode, nn_name, position)
+        elif position in ["START_FROM"]:
+          full_ds_idx = start_from_idx
         else:
           print("Incorrect position option:", position, ds_idx_pth, ds_idx_nm)
         self.last_ds_idx = full_ds_idx
@@ -574,6 +582,28 @@ class DatasetUtils():
             ds_idx_path = ds_idx_path + dqn_idx_name + "/"
         return ds_idx_path
 
+    def map_filename(self, app, runid):
+        map = self.cfg.APP_DIR + app + "_ANALYZE/" + f"Map{runid}.jpg"
+        return map
+
+    def alset_state_filename(self, app):
+        filename = self.cfg.APP_DIR + app + "_ANALYZE/" + "AlsetState.pkl"
+        return filename
+
+    def bounding_box_symlink_path(self, key):
+        sl_path = "../" + key + "/"
+        return sl_path
+
+    def bounding_box_path(self, key):
+        # bounding boxes are trained across apps or functions
+        bb_path = self.cfg.APP_DIR + "BOUNDING_BOXES/" + key + "/"
+        self.mkdirs([bb_path])
+        return bb_path
+
+    def bounding_box_file(self, runid, frame_num, bb_idx):
+        bb_name = f"BB_{runid}_{frame_num}_{bb_idx}.png"
+        return bb_name
+
     # ./apps/TT_DQN/dataset_indexes/TT_DQN_replay_buffer.data
     def dqn_replay_buffer(self):
         if self.app_type == "FUNC": 
@@ -598,3 +628,11 @@ class DatasetUtils():
             # print('Directory already exists')
             pass
 
+    def mksymlinks(self, robot_symlinks, source_file):
+        for symlnk in robot_symlinks:
+          try:
+              os.symlink(source_file, symlnk)
+              print("symlink {symlnk} {source_file}")
+          except FileExistsError:
+            # print('symlink already exists')
+            pass

@@ -29,6 +29,7 @@ class CVAnalysisTools():
 
   ###############################################
   # should remove from automated func
+  # True means moving. False means not moving.
   def optflow(self, old_frame_path, new_frame_path, add_edges=False, thresh=None):
       if old_frame_path is None:
         print("optflow: old_frame None")
@@ -360,42 +361,43 @@ class CVAnalysisTools():
   # Color histogram for texture mapping (e.g., roads, floor)
   ###############################################
   # plot the color histograms using opencv
-  def draw_image_histogram(image, channels, color='k'):
-      hist = cv2.calcHist([image], channels, None, [256], [0, 256])
-      plt.plot(hist, color=color)
-      plt.xlim([0, 256])
-  
-  def show_color_histogram(image):
-      for i, col in enumerate(['b', 'g', 'r']):
-          draw_image_histogram(image, [i], color=col)
-      plt.show()
-
-  def kullback_leibler_divergence(self, p, q):
-      p = np.asarray(p)
-      q = np.asarray(q)
-      filt = np.logical_and(p != 0, q != 0)
-      return np.sum(p[filt] * np.log2(p[filt] / q[filt]))
-  
-  def match_texture(self, img):
-      best_score = 10
-      best_name = None
-      lbp = local_binary_pattern(img, self.n_points, self.radius, self.TEXTURE_METHOD)
-      n_bins = int(lbp.max() + 1)
-      hist, _ = np.histogram(lbp, density=True, bins=n_bins, range=(0, n_bins))
-      for label in self.textures.keys():
-          ref_hist, _ = np.histogram(self.textures[label], density=True, bins=n_bins,
-                                     range=(0, n_bins))
-          score = kullback_leibler_divergence(hist, ref_hist)
-          # lower score is better
-          if score < best_score:
-              best_score = score
-              best_name = label
-      return best_name
- 
-  def register_texture(self, label, image):
-      lbp = local_binary_pattern(image, self.n_points, self.radius, self.TEXTURE_METHOD)
-      self.textures[label] = lbp
-
+# Moved to analyze_color.py
+#  def draw_image_histogram(image, channels, color='k'):
+#      hist = cv2.calcHist([image], channels, None, [256], [0, 256])
+#      plt.plot(hist, color=color)
+#      plt.xlim([0, 256])
+#  
+#  def show_color_histogram(image):
+#      for i, col in enumerate(['b', 'g', 'r']):
+#          draw_image_histogram(image, [i], color=col)
+#      plt.show()
+#
+#  def kullback_leibler_divergence(self, p, q):
+#      p = np.asarray(p)
+#      q = np.asarray(q)
+#      filt = np.logical_and(p != 0, q != 0)
+#      return np.sum(p[filt] * np.log2(p[filt] / q[filt]))
+#  
+#  def match_texture(self, img):
+#      best_score = 10
+#      best_name = None
+#      lbp = local_binary_pattern(img, self.n_points, self.radius, self.TEXTURE_METHOD)
+#      n_bins = int(lbp.max() + 1)
+#      hist, _ = np.histogram(lbp, density=True, bins=n_bins, range=(0, n_bins))
+#      for label in self.textures.keys():
+#          ref_hist, _ = np.histogram(self.textures[label], density=True, bins=n_bins,
+#                                     range=(0, n_bins))
+#          score = kullback_leibler_divergence(hist, ref_hist)
+#          # lower score is better
+#          if score < best_score:
+#              best_score = score
+#              best_name = label
+#      return best_name
+# 
+#  def register_texture(self, label, image, radius):
+#      lbp = local_binary_pattern(image, self.n_points, self.radius, self.TEXTURE_METHOD)
+#      self.textures[label] = lbp
+#
   ###############################################
   def get_lines(self, img):
       # Canny: Necessary parameters are:
@@ -632,7 +634,7 @@ class CVAnalysisTools():
         img = cv2.imread(frame_path)
       except Exception as e:
         try:
-          img = frame_path.copy()
+          img = frame_path
         except:
           print("Error: unable to read:", frame_path, e)
           return None, None, None

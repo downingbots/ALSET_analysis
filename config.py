@@ -41,6 +41,12 @@ class Config():
 
       #####################################################
       # SIMPLE PRETRAINED ATOMIC NNs OR AUTOMATED FUNCTIONS
+      # Eventually replace much of this functionality with 
+      # something more sophisticated - like block programming
+      # or splintered-reality py-trees (py-trees also supports ROS.)
+      # Or just a better wrapper that provides simple graphical
+      # programming of existing functions. The key is that
+      # many functions are supposed to be trained by a demonstration.
       #####################################################
       self.FUNC_policy = [
                          ["DQN_REWARD_PHASES", [[125,    300],   [275,   400]]],
@@ -108,7 +114,7 @@ class Config():
                             # "FOLLOW_AND_REACH_FOR"
                             # "FOLLOW_WALL"
                             # "FOLLOW_OBJECT"
-                            # "FOLLOW_ROUTE"
+                            # "FOLLOW_ROUTE" 
                             # "(UN)LOAD_PALLET"  # fork lift
                             # "(UN)STACK_PALLET"  # fork lift
                             # "(UN)STACK_OBJECT"  # fork lift

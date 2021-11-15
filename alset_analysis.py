@@ -2,9 +2,12 @@ from config import *
 from dataset_utils import *
 from func_app import *
 from analyze_gripper import *
-from analyze_move import *
+from analyze_arm import *
+from alset_state import *
 from analyze_map import *
+from analyze_move import *
 from analyze_clusters import *
+from alset_ratslam import *
 import gc
 
 class DSAnalysis():
@@ -12,22 +15,14 @@ class DSAnalysis():
       self.dsu = DatasetUtils(app_name, "ANALYZE")
       self.app_name = app_name
       self.app_type = app_type
-      self.app_ds_idx = self.dsu.dataset_indices(mode="ANALYZE", nn_name=self.app_name, position="NEW")
+      self.run_id   = None
+      self.run_num  = 0
+      self.func_app = None
+      self.start_with_func_index = None
       self.cfg = Config()
-      self.func_app   = None
-      self.prev_image = None
-      self.curr_image = None
-      self.adjusted_image = None
-      self.gripper_analysis = AnalyzeGripper()
-      ## predict next move
-      self.move_analysis = AnalyzeMove()
-      ## find parts of robot, determines effects of moves
-      # self.robot_analysis = AnalyzeRobot()
+      self.alset_state = AlsetState()
       ## find potential clusters including floor, keypoints, potential COIs, obstacles, BG movements
       ## runs YOLO9000, segmentation
-      self.analyze_clusters = AnalyzeClusters()
-      ## create a map, containing robot location and orientation, clusters, objects
-      self.map_analysis = AnalyzeMap()
       ## detailed analysis of cube
       # self.cube_analysis = AnalyzeCube()
       ## detailed analysis of box
@@ -35,19 +30,28 @@ class DSAnalysis():
       ## detailed analysis of box
       # self.face_analysis = AnalyzeFace
       self.MAX_MOVES_REWARD = None
-      self.cvu = CVAnalysisTools()
+      self.init_frame_num = 0
+      if self.alset_state.load_state() and self.alset_state.app_name is not None:
+        print("alset_analyzis.load_state")
+        self.load_state()
+        self.app_ds_idx = self.dsu.dataset_indices(mode="ANALYZE", nn_name=self.app_name, position="START_FROM", start_from_idx=self.start_with_func_index)
+      while True:
+        self.gripper_analysis = AnalyzeGripper(self.alset_state)
+        self.arm_analysis = AnalyzeArm(self.alset_state)
+        ## predict next move
+        self.move_analysis = AnalyzeMove()
+        ## create a map, containing robot location and orientation, clusters, objects
+        self.map_analysis = AnalyzeMap(self.alset_state)
+        self.analyze_clusters = AnalyzeClusters(self.alset_state)
+        self.cvu = CVAnalysisTools()
 
-      self.parse_app_dataset()
-
-  def get_state(self):
-      return [self.gripper_analysis, self.robot_analysis, self.analyze_clusters,
-              self.map_analysis, self.cube_analysis, self.box_analysis]
-
-  def store_state(self):
-      pass
-
-  def restore_state(self):
-      pass
+        ## Analyze the next app dataset
+        self.alset_state.init_app_run(app_run_num=self.run_num, app_mode=app_type)
+        res = self.parse_app_dataset()
+        self.alset_state.post_run_analysis()
+        if res is None:
+          break
+        self.run_num += 1
 
   # TODO: largely cloned from alset_dqn.py.  Should cleanup/parameterize a function callback.
   def parse_func_dataset(self, NN_name, app_mode="FUNC"):
@@ -55,7 +59,6 @@ class DSAnalysis():
       print("PFD: >>>>> parse_func_dataset")
       app_dsu = DatasetUtils(self.app_name, "ANALYZE")
 
-      frame_num = 0
       ###################################################
       # iterate through NNs and fill in the info
       while True:
@@ -64,11 +67,13 @@ class DSAnalysis():
             print("PFD: parse_func_dataset: done")
             break
           print("Parsing FUNC idx", func_index)
-          frame_num = 0
+          self.run_id = app_index[-13:-5]
+          self.alset_state.record_run_id(func_index, self.run_id)
           run_complete = False
           line = None
           next_action = None
           next_line = None
+          frame_num = 0
           self.curr_phase = 0
           nn_filehandle = open(func_index, 'r')
           line = None
@@ -92,14 +97,19 @@ class DSAnalysis():
                 continue
 
               else:
-                self.dispatch(frame_num, action, state, next_state, done)
+                if frame_num > self.init_frame_num:
+                  self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state)
+                  self.dispatch(frame_num, action, state, next_state, done)
                 print("PFD: dispatch:", frame_num, action, reward, done, next_action)
               if next_action == "REWARD1":
-                self.dispatch(frame_num, action, state, next_state, done)
+                if frame_num > self.init_frame_num:
+                  self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state)
+                  self.dispatch(frame_num, action, state, next_state, done)
                 done = True  # end of func is done in this mode
                 print("PFD: completed REWARD phase2", frame_num, next_action, reward, done)
               elif next_action in ["PENALTY1", "PENALTY2"]:
-                self.dispatch(frame_num, action, state, next_state, done)
+                if frame_num > self.init_frame_num:
+                  self.dispatch(frame_num, action, state, next_state, done)
                 done = True  # end of func is done in this mode
                 print("PFD: assessed run-ending PENALTY", frame_num, next_action, reward, done)
               frame_num += 1
@@ -128,7 +138,10 @@ class DSAnalysis():
         if app_index is None:
           print("PAD: parse_app_dataset: unknown NEXT index or DONE")
           return None
-        print("PAD: Parsing APP idx", app_index)
+        # get run_id from APP_IDX (e.g., TT_APP_IDX_21_06_09b.txt)
+        self.run_id = app_index[-13:-5]
+        self.alset_state.record_run_id(app_index, self.run_id)
+        print("PAD: Parsing APP idx", app_index, self.run_id)
         app_filehandle = open(app_index, 'r')
         run_complete = False
         line = None
@@ -202,28 +215,32 @@ class DSAnalysis():
             # get action & next_action (nn_name is None)
             [tm, app, mode, next_nn_name, next_action, img_name, next_state] = self.dsu.get_dataset_info(next_line, mode="FUNC")
             if line is not None:
-              [tm, app, mode, nn_name, action, img_name, state] = self.dsu.get_dataset_info(line, mode="FUNC")
+              [tm, app, mode, NN_name, action, img_name, state] = self.dsu.get_dataset_info(line, mode="FUNC")
               if action == "NOOP":
                 # Too common in initial test dataset. Print warning later?
-                # print("NOOP action, NN:", action, nn_name)
+                # print("NOOP action, NN:", action, NN_name)
                 line = next_line
                 continue
               elif action == "REWARD1":
-                print("PAD: Goto next NN; NOOP Reward, curr_NN", action, nn_name)
+                print("PAD: Goto next NN; NOOP Reward, curr_NN", action, NN_name)
                 line = next_line
                 continue
               else:
+                print("amnais:", self.app_name, mode, NN_name, action, img_name, state)
+                self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
                 # the final compute reward sets done to True (see above)
                 self.dispatch(frame_num, action, state, next_state, done)
                 print("PAD: dispatch:", frame_num, action, reward, done)
               if next_action == "REWARD1" and func_flow_reward == "REWARD1":
                 print("PAD: FUNC_FLOW_REWARD4:", func_flow_reward)
+                self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
                 self.dispatch(frame_num, action, state, next_state, done)
                 print("PAD: completed REWARD phase", frame_num, next_action, reward, done)
                 if func_flow_nn_name is None:
                   done = True  
                 print("PAD: granted REWARD", frame_num, next_action, reward, done)
               elif next_action in ["PENALTY1", "PENALTY2"]:
+                self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
                 self.dispatch(frame_num, action, state, next_state, done)
                 if func_flow_nn_name is None:
                   done = True  
@@ -245,7 +262,11 @@ class DSAnalysis():
       gc.collect()
       self.move_analysis.train_predictions(action)
       # add_to_mean should only be True in dispatch()
-      self.adjusted_image, mean_dif, rl_bb = self.cvu.adjust_light(curr_img, add_to_mean=True)
+      adjusted_image, mean_dif, rl_bb = self.cvu.adjust_light(curr_img, add_to_mean=True)
+      self.alset_state.record_lighting(self.cvu.MeanLight, mean_dif, rl_bb)
+
+      # if action in ["FORWARD","REVERSE","LEFT","RIGHT"]:
+      #   alset_ratslam(adjusted_image)
       if self.func_app.curr_func_name == "PARK_ARM_RETRACTED":
         self.analyze_PARetracted(frame_num, action, prev_img, curr_img, done)
         print("curr_func_name: ", self.func_app.curr_func_name)
@@ -280,14 +301,21 @@ class DSAnalysis():
 #        self.box_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)
         print("PAR1")
         result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-      self.store_state()
+      self.alset_state.save_state()
       return done 
 
   def analyze_PARetracted(self, frame_num, action, prev_img, curr_img, done):
       if action in ["GRIPPER_OPEN", "GRIPPER_CLOSE"]:
         self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-      # else:
-      #   self.robot_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+      else:
+        self.arm_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
 
+  def load_state(self):
+      self.app_name  = self.alset_state.last_app_state("APP_NAME")
+      self.app_type  = self.alset_state.last_app_state("APP_MODE")
+      self.run_id    = self.alset_state.last_app_state("APP_RUN_ID")
+      self.run_num   = self.alset_state.last_app_state("APP_RUN_NUM")
+      self.start_with_func_index = self.alset_state.last_app_state("FUNC_INDEX")
+      self.init_frame_num = self.alset_state.last_frame_state("FRAME_NUM")
 
 dsa = DSAnalysis()

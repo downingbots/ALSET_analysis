@@ -13,6 +13,15 @@
 #  - compute orientation
 #    -> keep track
 #
+# Frame
+#  - Object passed in from Alset_analysis to everybody
+#  - all object can get info they want from the stats
+#  - stats keep info up to date so resume of analysis is possible
+#  - commands to wipe out stats for frame/run/allruns
+#
+# Run
+# all_runs
+#
 #Forward pass
 #  - Gather Frames and metadata as go
 #    - rerun with data already gathered
