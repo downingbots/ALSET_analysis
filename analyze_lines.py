@@ -17,7 +17,6 @@ class LineAnalysis():
       self.cfg = Config()
       self.cvu = CVAnalysisTools()
 
-
     #########################
     # Map Line Analysis 
     #########################

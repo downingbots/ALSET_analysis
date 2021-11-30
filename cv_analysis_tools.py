@@ -10,8 +10,9 @@ from pprint import pprint
 from utilborders import *
 
 class CVAnalysisTools():
-  def __init__(self):
+  def __init__(self, alset_state=None):
       # foreground/background for movement detection
+      self.alset_state = alset_state
       self.background = None
       self.foreground = None
       self.unmoved_pix = None
@@ -24,8 +25,16 @@ class CVAnalysisTools():
       self.radius = None
       self.TEXTURE_METHOD = 'uniform'
       self.textures = {}
-      self.MeanLight = 0
-      self.MeanLightCnt = 0
+      self.MeanLight = None
+      self.MeanLightCnt = None
+
+  def load_state(self):
+      blckbrd = self.alset_state.get_blackboard("CV_LIGHT")
+      if blckbrd is None:
+        self.MeanLightCnt = 0 
+        self.MeanLight = 0
+      else:
+        [self.MeanLightCnt, self.MeanLight] = blckbrd
 
   ###############################################
   # should remove from automated func
@@ -642,10 +651,18 @@ class CVAnalysisTools():
       hsv  = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2HSV)
       h, s, v = cv2.split(hsv)
       mean_v = cv2.mean(v)[0]
+      if self.MeanLight is None or self.MeanLightCnt is None:
+        blkbrd = self.alset_state.get_blackboard("CV_LIGHT")
+        if blkbrd is None:
+          self.MeanLight = 0
+          self.MeanLightCnt = 0
+        else:
+          [self.MeanLightCnt, self.MeanLight] = blkbrd
       if add_to_mean:
         # compute overall mean over time
         self.MeanLight = (self.MeanLightCnt*self.MeanLight + mean_v)/(self.MeanLightCnt+1)
         self.MeanLightCnt += 1
+        self.alset_state.set_blackboard("CV_LIGHT", [self.MeanLightCnt, self.MeanLight])
       adjusted_img  = img
       mean_dif = 0
       if self.MeanLightCnt > 10:
@@ -673,7 +690,7 @@ class CVAnalysisTools():
           rl_img = orig.copy()
           cv2.circle(rl_img, maxLoc, radius, (255, 0, 0), 2)
           # display the results of our newly improved method
-          # cv2.imshow("Robust brightest spot", rl_img)
+          cv2.imshow("Robust brightest spot", rl_img)
           # cv2.waitKey(0)
 
           # compute mean within region
@@ -688,24 +705,32 @@ class CVAnalysisTools():
             diameter_y = diameter
           rl_miny = int(np.round(max(0, maxLoc[1] - radius)))
           rl_maxy = int(np.round(min(rl_img.shape[1],rl_miny + diameter_y)))
-          # if brightest spot is near edge, need to cap diameter_w/diameter_h
-          robot_light_bounding_box = [[[rl_minx, rl_miny]],[[rl_minx, rl_maxy]], [[rl_maxx, rl_maxy]], [[rl_maxx, rl_miny]]]
-          # kindof assumes gripper is open
-          print("robot_light_bounding_box:", robot_light_bounding_box)
-          robot_light_img = np.zeros((rl_maxy-rl_miny, rl_maxx-rl_minx, 3), dtype="uint8")
-          robot_light_img[0:rl_maxy-rl_miny, 0:rl_maxx-rl_minx] = img[rl_miny:rl_maxy, rl_minx:rl_maxx]
-          print("robot_light_img.shape:", robot_light_img.shape)
-          # cv2.imshow("robot light Image", robot_light_img)
-          # cv2.waitKey(0)
+          if rl_maxy > rl_miny:
+            # if not, rounding errors; but basically a difference of 1 is too small
+            # if brightest spot is near edge, need to cap diameter_w/diameter_h
+            robot_light_bounding_box = [[[rl_minx, rl_miny]],[[rl_minx, rl_maxy]], [[rl_maxx, rl_maxy]], [[rl_maxx, rl_miny]]]
+            # kindof assumes gripper is open
+            print("robot_light_bounding_box:", robot_light_bounding_box)
+            print("rlmaxy, rlminy, rlmaxx, rlminx:", rl_maxy, rl_miny, rl_maxx, rl_minx)
+            # robot_light_img = np.zeros((rl_maxy-rl_miny, rl_maxx-rl_minx, 3), dtype="uint8")
+            robot_light_img = np.zeros((rl_maxx-rl_minx, rl_maxy-rl_miny, 3), dtype="uint8")
+            print("img.shape:", img.shape, rl_maxy-rl_miny, rl_maxx-rl_minx)
+            # robot_light_img[0:rl_maxy-rl_miny, 0:rl_maxx-rl_minx] = img[rl_miny:rl_maxy, rl_minx:rl_maxx]
+            robot_light_img[0:rl_maxx-rl_minx, 0:rl_maxy-rl_miny] = img[rl_minx:rl_maxx, rl_miny:rl_maxy]
 
-          robot_light_hsv  = cv2.cvtColor(robot_light_img.copy(), cv2.COLOR_BGR2HSV)
-          rl_h, rl_s, rl_v = cv2.split(robot_light_hsv)
-          rl_mean_v = cv2.mean(rl_v)[0]
-          rl_mean_dif = int(abs(np.round(self.MeanLight - rl_mean_v)))
-
-          adjusted_rl_v = rl_v.copy()
-          adjusted_rl_v[adjusted_rl_v <= rl_mean_dif] = 0
-          adjusted_rl_v[adjusted_rl_v > rl_mean_dif] -= rl_mean_dif
+            robot_light_hsv  = cv2.cvtColor(robot_light_img.copy(), cv2.COLOR_BGR2HSV)
+            rl_h, rl_s, rl_v = cv2.split(robot_light_hsv)
+            rl_mean_v = cv2.mean(rl_v)[0]
+            rl_mean_dif = int(abs(np.round(self.MeanLight - rl_mean_v)))
+            adjusted_rl_v = rl_v.copy()
+            adjusted_rl_v[adjusted_rl_v <= rl_mean_dif] = 0
+            adjusted_rl_v[adjusted_rl_v > rl_mean_dif] -= rl_mean_dif
+          else:
+            # we've failed to compute the robot light image
+            print("FAILED TO COMPUTE THE ROBOT LIGHT IMAGE")
+            rl_mean_v = 0
+            rl_mean_dif = 0
+            robot_light_bounding_box = None
 
           # compute mean outside region
           unlit_mean_v = mean_v * img.shape[0] * img.shape[1] - rl_mean_v * (rl_maxy-rl_miny) * (rl_maxx-rl_minx)
@@ -899,6 +924,4 @@ class HoughBundler:
                     merged_lines_all.extend(merged_lines)
 
         return merged_lines_all
-
-
 

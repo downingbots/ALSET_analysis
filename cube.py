@@ -143,7 +143,12 @@ def find_square(img):
     # find all external contours in the threshold image then find
     # the *largest* contour which will be the contour/outline of
     # the stitched image
-    imagecontours, hierarchy = cv2.findContours(img,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
+    try:
+      sqimg = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    except:
+      sqimg = img
+    sqimg = cv2.bitwise_not(sqimg)
+    imagecontours, hierarchy = cv2.findContours(sqimg,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
 
     # for each of the contours detected, the shape of the contours is approximated 
     # using approxPolyDP() function and the contours are drawn in the image using 
@@ -156,8 +161,8 @@ def find_square(img):
       for i, c  in enumerate(imagecontours):
         area = cv2.contourArea(c)
         M = cv2.moments(c)
-        # print(i, "area, moment:", area, M, len(c))
-        # print(i, "area:", area, len(c))
+        print(i, "area, moment:", area, M, len(c))
+        print(i, "area:", area, len(c))
     for count in imagecontours:
       # epsilon = 0.01 * cv2.arcLength(count, True)
       epsilon = 0.01 * cv2.arcLength(count, True)
@@ -170,6 +175,10 @@ def find_square(img):
       elif len(approximations) == 4:
         shape = "Trapezoid"
         area = cv2.contourArea(approximations)
+        sqimg2 = sqimg.copy()
+        cv2.drawContours(sqimg2, imagecontours, -1, (0,255,0), 3)
+        cv2.imshow("contours", sqimg2)
+        cv2.waitKey()
         # if area > 100 &  cv2.isContourConvex(approximations):
         if cv2.isContourConvex(approximations):
           maxCosine = -100000000000000
@@ -206,8 +215,8 @@ def find_square(img):
       print("shape:", shape, squares)
     return squares
 
-def preprocess_cube2(img_path):
-      cvu = CVAnalysisTools()
+def preprocess_cube2(img_path, alset_state):
+      cvu = CVAnalysisTools(alset_state)
       img,mean_diff,rl_bb = cvu.adjust_light(img_path)
       orig_img = img.copy()
       img = cv2.Canny(img, 50, 200, None, 3)
@@ -254,17 +263,17 @@ def preprocess_cube(img):
     return dilated_thresh_image, img
    
     
-def find_cube(img):
-    return
-    gray, img = preprocess_cube2(img)
+def find_cube(img, alset_state):
+    gray, img = preprocess_cube2(img, alset_state)
     # cv2.imshow("dti", img)
     # cv2.waitKey(0)
     find_kp(img)
     # find_square(gray)
 
     # invert the black and white image for the LineDetection
-    inverted_dilated_thresh_image = cv2.bitwise_not(gray)
-    find_square(inverted_dilated_thresh_image)
+    # inverted_dilated_thresh_image = cv2.bitwise_not(gray)
+    # find_square(inverted_dilated_thresh_image)
+    find_square(gray)
     
     img2 = img.copy()
     # Control the lines we want to find (minimum size and minimum distance between two lines)
@@ -280,7 +289,8 @@ def find_cube(img):
     
     # Keep in mind that this is opencv 2.X not version 3 (the results of the api differ)
     # ARD: fixed for python3
-    lines = cv2.HoughLinesP(inverted_dilated_thresh_image, 
+    # lines = cv2.HoughLinesP(inverted_dilated_thresh_image, 
+    lines = cv2.HoughLinesP(gray, 
         rho = 1,
         theta = 1 * np.pi/180,
         lines=np.array([]),
@@ -526,3 +536,5 @@ def find_cube(img):
 # img_path = "/tmp/d5f6fec0-b602-11eb-abe9-16f63a1aa8c9.jpg"
 # img = cv2.imread(img_path)
 # find_cube(img)
+
+

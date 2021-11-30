@@ -23,7 +23,7 @@ class AnalyzeGripper():
       self.fully_closed_cnt = None
       self.alset_state = alset_state
       self.add_edges = False   # didn't seem to add much, if anything
-      self.cvu = CVAnalysisTools()
+      self.cvu = CVAnalysisTools(self.alset_state)
       self.cfg = Config()
       self.dsu = None
 
@@ -410,6 +410,8 @@ class AnalyzeGripper():
         self.alset_state.record_bounding_box(left_labels, left_gripper_bounding_box) 
       if len(right_gripper_bounding_box) == 4:
         self.alset_state.record_bounding_box(right_labels, right_gripper_bounding_box) 
+      if len(right_gripper_bounding_box) != 4 or len(right_gripper_bounding_box) != 4:
+        print("left/right grip bb:", left_gripper_bounding_box, right_gripper_bounding_box)
       # note: safe_ground_info recorded by self.get_drivable_ground()
       return [left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info[0]]
 
@@ -420,3 +422,9 @@ class AnalyzeGripper():
 
       ret_val = [[label, bounding_box],[label, bounding_box]]
       return ret_val
+
+  def load_state(self):
+      self.gripper_state = self.alset_state.gripper_state["GRIPPER_POSITION"]
+      self.gripper_open_cnt = self.alset_state.gripper_state["GRIPPER_OPEN_COUNT"]
+      self.gripper_close_cnt = self.alset_state.gripper_state["GRIPPER_CLOSED_COUNT"]
+

@@ -65,7 +65,7 @@ class LocalBinaryPattern:
       for label in self.textures.keys():
           ref_hist, _ = np.histogram(self.textures[label], density=True, bins=n_bins,
                                      range=(0, n_bins))
-          score = kullback_leibler_divergence(hist, ref_hist)
+          score = self.kullback_leibler_divergence(hist, ref_hist)
           # lower score is better
           if score < best_score:
               best_score = score
@@ -80,7 +80,7 @@ class LocalBinaryPattern:
       self.set_params(gray_image)
       lbp = local_binary_pattern(gray_image, self.n_points, self.radius, self.TEXTURE_METHOD)
       if run_id is not None and frame_num is not None:
-        key = label + "_" + run_id + "_" + frame_num
+        key = label + "_" + str(run_id) + "_" + str(frame_num)
       else:
         key = label
       self.textures[key] = lbp

@@ -117,7 +117,7 @@ class Config():
                             # "FOLLOW_ROUTE" 
                             # "(UN)LOAD_PALLET"  # fork lift
                             # "(UN)STACK_PALLET"  # fork lift
-                            # "(UN)STACK_OBJECT"  # fork lift
+                            # "(UN)STACK_OBJECT"  # fork lift, robot arm
                             # "LINEUP_OBJECTS"  # fork lift
                             # "GOTO_LOCATION_BY_TRIANGULATION"  # fork lift
                             # "GOTO_LOCATION_BY_FIDUCIAL"  # fork lift
