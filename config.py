@@ -557,6 +557,8 @@ class Config():
       # map actions to web controller images
       self.DEFAULT_WEBCAM_IP     = self.IP_ADDR 
       self.DEFAULT_WEBCAM_PORT   = 8080
+      self.IMG_H   = 224
+      self.IMG_W   = 224
       
       ###################################
       # FUNC KEY REGISTRATION

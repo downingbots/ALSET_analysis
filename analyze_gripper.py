@@ -70,7 +70,7 @@ class AnalyzeGripper():
   def gripper_contours(self, image_path):
       try:
         # image = cv2.imread(image_path)
-        image,mean_diff, rl_bb = self.adjust_light(image_path)
+        image,mean_diff, rl = self.adjust_light(image_path)
       except:
         image = image_path
       try:
@@ -154,7 +154,7 @@ class AnalyzeGripper():
 #      maxK = 6
 #      for K in range(minK, maxK):
 #        pm_floor_clusters = self.cvu.color_quantification(image, K)
-      image, mean_dif, rl_bb = self.cvu.adjust_light(image_path)
+      image, mean_dif, rl = self.cvu.adjust_light(image_path)
       sg_minx = lg_bb[2][0][0]+1
       sg_maxx = rg_bb[0][0][0]-1 
       sg_miny = max(lg_bb[0][0][1], rg_bb[0][0][1])
@@ -341,7 +341,7 @@ class AnalyzeGripper():
               g_mean_edges = np.round(g_mean_edges)
               g_mean_edges_img = np.uint8(g_mean_edges.copy())
               # curr_img = cv2.imread(curr_img_path)
-              curr_img, mean_dif, rl_bb = self.cvu.adjust_light(curr_img_path)
+              curr_img, mean_dif, rl = self.cvu.adjust_light(curr_img_path)
               # contours, image = self.cvu.unmoved_pixel_contours(g_mean_edges_img, curr_img)
               left_gripper_bounding_box, right_gripper_bounding_box, image = self.cvu.get_gripper_bounding_box(g_mean_edges_img, curr_img)
               # cv2.imshow("mean_gripper_edges", g_mean_edges_img)
@@ -351,7 +351,7 @@ class AnalyzeGripper():
                 # obj_bounding_box = self.get_object_bounding_box(left_gripper_bounding_box, right_gripper_bounding_box, curr_img)
                 if obj_nm == "CUBE":
                   print("find cube")
-                  curr_img, mean_dif, rl_bb = self.cvu.adjust_light(curr_img_path)
+                  curr_img, mean_dif, rl = self.cvu.adjust_light(curr_img_path)
                   # find_cube(curr_img)
 
             if action == "FORWARD":

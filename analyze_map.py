@@ -754,27 +754,28 @@ class AnalyzeMap():
         return rot, off_h, off_w
 
     #########################
-    def mean_sq_err(self, imageA, imageB):
-        # the 'Mean Squared Error' between the two images is the
-        # sum of the squared difference between the two images;
-        # NOTE: the two images must have the same dimension
-        # err = np.sum((imageA.astype("float") - imageB.astype("float")) ** 2)
-        err = np.sum((imageA.astype("float") - imageB.astype("float")) ** 2)
-        print("np.sum diff sqr", err)
-        # Normalized Least Squared Error
-        err /= np.sum((imageA.astype("float")) ** 2)
-        # Least Squared Error
-        # err /= float(imageA.shape[0] * imageA.shape[1])
-        print("mse shape", float(imageA.shape[0] * imageA.shape[1]), np.sum((imageA.astype("float")) ** 2))
-
-        # return the MSE, the lower the error, the more "similar"
-        # the two images are
-        return err
+# moved to cvu
+#    def mean_sq_err(self, imageA, imageB):
+#        # the 'Mean Squared Error' between the two images is the
+#        # sum of the squared difference between the two images;
+#        # NOTE: the two images must have the same dimension
+#        # err = np.sum((imageA.astype("float") - imageB.astype("float")) ** 2)
+#        err = np.sum((imageA.astype("float") - imageB.astype("float")) ** 2)
+#        print("np.sum diff sqr", err)
+#        # Normalized Least Squared Error
+#        err /= np.sum((imageA.astype("float")) ** 2)
+#        # Least Squared Error
+#        # err /= float(imageA.shape[0] * imageA.shape[1])
+#        print("mse shape", float(imageA.shape[0] * imageA.shape[1]), np.sum((imageA.astype("float")) ** 2))
+#
+#        # return the MSE, the lower the error, the more "similar"
+#        # the two images are
+#        return err
 
     def compare_images(self, imageA, imageB, mse_only=True, title=None):
         # compute the mean squared error and structural similarity
         # index for the images
-        m = self.mean_sq_err(imageA, imageB)
+        m = self.cvu.mean_sq_err(imageA, imageB)
         if mse_only:
           return m, self.cfg.INFINITE
         try:
@@ -1084,7 +1085,7 @@ class AnalyzeMap():
     def analyze(self, frame_num, action, prev_img_pth, curr_img_pth, done):
         self.frame_num = frame_num
         # curr_image = cv2.imread(curr_img_pth)
-        curr_image,mean_diff,rl_bb = self.cvu.adjust_light(curr_img_pth)
+        curr_image,mean_diff,rl = self.cvu.adjust_light(curr_img_pth)
         curr_image_KP = Keypoints(curr_image)
         # ARD: TODO: fix frame_num hack
         if frame_num > 213:
@@ -1096,7 +1097,7 @@ class AnalyzeMap():
         if self.curr_move is not None:
           self.prev_move = self.curr_move.copy()
         else:
-          prev_image,mean_diff,rl_bb = self.cvu.adjust_light(prev_img_pth)
+          prev_image,mean_diff,rl = self.cvu.adjust_light(prev_img_pth)
           prev_bird_eye_vw = self.get_birds_eye_view(prev_image)
           self.prev_move = prev_bird_eye_vw
         self.curr_move = bird_eye_vw
@@ -1244,7 +1245,7 @@ class AnalyzeMap():
         action = self.alset_state.last_frame_state("ACTION")
         if action in ["FORWARD","REVERSE","LEFT","RIGHT"]:
           curr_image_path = self.alset_state.last_frame_state("FRAME_PATH")
-          curr_image,mean_diff,rl_bb = self.cvu.adjust_light(curr_img_path)
+          curr_image,mean_diff,rl = self.cvu.adjust_light(curr_img_path)
           vtrans = self.alset_state.last_frame_state("MOVE_STRAIGHT")
           vrot = self.alset_state.last_frame_state("MOVE_ROTATION")
           alset_ratslam(curr_image, vtrans, vrot)

@@ -285,9 +285,10 @@ class DSAnalysis():
       gc.collect()
       self.move_analysis.train_predictions(action)
       # add_to_mean should only be True in dispatch()
-      adjusted_image, mean_dif, rl_bb = self.cvu.adjust_light(curr_img, add_to_mean=True)
+      adjusted_image, mean_dif, rl = self.cvu.adjust_light(curr_img, add_to_mean=True)
       try:
-        self.alset_state.record_lighting(self.cvu.MeanLight, mean_dif, rl_bb)
+        print("record lighting :", self.cvu.MeanLight, mean_dif, rl["COMPACTNESS"], rl["CENTER"])
+        self.alset_state.record_lighting(self.cvu.MeanLight, mean_dif, rl)
       except Exception as e:
         # ugly hack for last REWARD; why empty frame state?
         print("record lighting error:", e)

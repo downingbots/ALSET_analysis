@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import math
+import statistics
 from imutils import *
 from config import *
 from matplotlib import pyplot as plt
@@ -45,8 +46,8 @@ class CVAnalysisTools():
         return True
       # old_frame = cv2.imread(old_frame_path)
       # new_frame = cv2.imread(new_frame_path)
-      old_frame,mean_diff,rl_bb = self.adjust_light(old_frame_path)
-      new_frame,mean_diff,rl_bb = self.adjust_light(new_frame_path)
+      old_frame,mean_diff,rl = self.adjust_light(old_frame_path)
+      new_frame,mean_diff,rl = self.adjust_light(new_frame_path)
       opt_flow_results = self.optflow_pts(old_frame, new_frame, add_edges, thresh)
       return opt_flow_results["result"]
 
@@ -191,8 +192,8 @@ class CVAnalysisTools():
   def moved_pixels(self, prev_img_path, curr_img_path, init=False, add_edges=False):
       # prev_img = cv2.imread(prev_img_path)
       # curr_img = cv2.imread(curr_img_path)
-      curr_img,mean_diff,rl_bb = self.adjust_light(curr_img_path)
-      prev_img,mean_diff,rl_bb = self.adjust_light(prev_img_path)
+      curr_img,mean_diff,rl = self.adjust_light(curr_img_path)
+      prev_img,mean_diff,rl = self.adjust_light(prev_img_path)
       if add_edges:
         prev_img = cv2.Canny(prev_img, 50, 200, None, 3)
         curr_img = cv2.Canny(curr_img, 50, 200, None, 3)
@@ -313,8 +314,8 @@ class CVAnalysisTools():
       try:
         # prev_img = cv2.imread(prev_img_path)
         # curr_img = cv2.imread(curr_img_path)
-        curr_img,mean_diff,rl_bb = self.adjust_light(curr_img_path)
-        prev_img,mean_diff,rl_bb = self.adjust_light(prev_img_path)
+        curr_img,mean_diff,rl = self.adjust_light(curr_img_path)
+        prev_img,mean_diff,rl = self.adjust_light(prev_img_path)
       except:
         prev_img = prev_img_path.copy()
         curr_img = curr_img_path.copy()
@@ -638,7 +639,7 @@ class CVAnalysisTools():
   # find center of light.
   # do bi-modal light adjustment if necessary.
   ###################
-  def adjust_light(self, frame_path, add_to_mean=False, gripper_state="FULLY_OPEN"):
+  def adjust_light(self, frame_path, add_to_mean=False, gripper_state="FULLY_OPEN", force_bb=False):
       try:
         img = cv2.imread(frame_path)
       except Exception as e:
@@ -647,8 +648,12 @@ class CVAnalysisTools():
         except:
           print("Error: unable to read:", frame_path, e)
           return None, None, None
-      font = cv2.FONT_HERSHEY_SIMPLEX
-      hsv  = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2HSV)
+      # font = cv2.FONT_HERSHEY_SIMPLEX
+      try:
+        hsv  = cv2.cvtColor(img.copy(), cv2.COLOR_BGR2HSV)
+      except:
+        # grayscale: no mean to set
+        return img, 0, None
       h, s, v = cv2.split(hsv)
       mean_v = cv2.mean(v)[0]
       if self.MeanLight is None or self.MeanLightCnt is None:
@@ -664,112 +669,292 @@ class CVAnalysisTools():
         self.MeanLightCnt += 1
         self.alset_state.set_blackboard("CV_LIGHT", [self.MeanLightCnt, self.MeanLight])
       adjusted_img  = img
-      mean_dif = 0
-      if self.MeanLightCnt > 10:
-        mean_dif = int(abs(np.round(self.MeanLight - mean_v)))
-        print("big change in lighting.  mean_dif:", mean_dif, self.MeanLight)
-      
-        if abs(mean_dif) > .1 * abs(self.MeanLight):
-          # big light difference. Likely due the robot arm LED.
-          orig = img.copy()
-          gray = cv2.cvtColor(orig, cv2.COLOR_BGR2GRAY)
-          # perform a naive attempt to find the (x, y) coordinates of
-          # the area of the image with the largest intensity value
-          (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(gray)
-          # display the results of the naive attempt
-          # cv2.circle(img, maxLoc, 5, (255, 0, 0), 2)
-          # cv2.imshow("Naive brightest spot", img)
-          # apply a Gaussian blur to the image then find the brightest region
-          diameter = int(img.shape[0] / 2.5)
-          if diameter % 2 != 1:
-            diameter += 1
-          radius = int(diameter/2 + 1)
+      mean_dif = int(abs(np.round(self.MeanLight - mean_v)))
 
-          gray = cv2.GaussianBlur(gray, (radius, radius), 0)
-          (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(gray)
-          rl_img = orig.copy()
-          cv2.circle(rl_img, maxLoc, radius, (255, 0, 0), 2)
-          # display the results of our newly improved method
-          cv2.imshow("Robust brightest spot", rl_img)
-          # cv2.waitKey(0)
+      # find robot light through kmeans analysis
 
-          # compute mean within region
-          # right shape, wrong values
-          rl_minx = int(np.round(max(0, maxLoc[0] - radius)))
-          rl_maxx = int(np.round(min(rl_img.shape[0],rl_minx + diameter)))
-          print("rlimgshaper, rlmaxx:", rl_img.shape[1],rl_minx + diameter)
-          if gripper_state == "FULLY_CLOSED":
-            # diameter_y = int(diameter/2)
-            diameter_y = (diameter)
-          else:
-            diameter_y = diameter
-          rl_miny = int(np.round(max(0, maxLoc[1] - radius)))
-          rl_maxy = int(np.round(min(rl_img.shape[1],rl_miny + diameter_y)))
-          if rl_maxy > rl_miny:
-            # if not, rounding errors; but basically a difference of 1 is too small
-            # if brightest spot is near edge, need to cap diameter_w/diameter_h
-            robot_light_bounding_box = [[[rl_minx, rl_miny]],[[rl_minx, rl_maxy]], [[rl_maxx, rl_maxy]], [[rl_maxx, rl_miny]]]
-            # kindof assumes gripper is open
-            print("robot_light_bounding_box:", robot_light_bounding_box)
-            print("rlmaxy, rlminy, rlmaxx, rlminx:", rl_maxy, rl_miny, rl_maxx, rl_minx)
-            # robot_light_img = np.zeros((rl_maxy-rl_miny, rl_maxx-rl_minx, 3), dtype="uint8")
-            robot_light_img = np.zeros((rl_maxx-rl_minx, rl_maxy-rl_miny, 3), dtype="uint8")
-            print("img.shape:", img.shape, rl_maxy-rl_miny, rl_maxx-rl_minx)
-            # robot_light_img[0:rl_maxy-rl_miny, 0:rl_maxx-rl_minx] = img[rl_miny:rl_maxy, rl_minx:rl_maxx]
-            robot_light_img[0:rl_maxx-rl_minx, 0:rl_maxy-rl_miny] = img[rl_minx:rl_maxx, rl_miny:rl_maxy]
+      Z = v.reshape((-1,1))
+      # convert to np.float32
+      Z = np.float32(Z)
 
-            robot_light_hsv  = cv2.cvtColor(robot_light_img.copy(), cv2.COLOR_BGR2HSV)
-            rl_h, rl_s, rl_v = cv2.split(robot_light_hsv)
-            rl_mean_v = cv2.mean(rl_v)[0]
-            rl_mean_dif = int(abs(np.round(self.MeanLight - rl_mean_v)))
-            adjusted_rl_v = rl_v.copy()
-            adjusted_rl_v[adjusted_rl_v <= rl_mean_dif] = 0
-            adjusted_rl_v[adjusted_rl_v > rl_mean_dif] -= rl_mean_dif
-          else:
-            # we've failed to compute the robot light image
-            print("FAILED TO COMPUTE THE ROBOT LIGHT IMAGE")
-            rl_mean_v = 0
-            rl_mean_dif = 0
-            robot_light_bounding_box = None
+      # define criteria, number of clusters(K) and apply kmeans()
+      criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+      K = 2
+      compactness,label,center=cv2.kmeans(Z,K,None,criteria,10,cv2.KMEANS_RANDOM_CENTERS)
+      rl = {}
+      # Compactness is the sum of squared distance from each pt to their center
+      rl["COMPACTNESS"] = compactness
+      rl["LABEL"] = label
+      rl["CENTER"] = center
+      if center[0] > center[1]:
+       rl["LIGHT"] = 0
+      else:
+       rl["LIGHT"] = 1
+      print("compactness, center, label cnt:", int(compactness), center, len([label==1]))
+      return adjusted_img, mean_dif, rl
 
-          # compute mean outside region
-          unlit_mean_v = mean_v * img.shape[0] * img.shape[1] - rl_mean_v * (rl_maxy-rl_miny) * (rl_maxx-rl_minx)
-          # unlit_mean_v /= ((img.shape[1]-(rl_maxx-rl_minx)) * (img.shape[0]-(rl_maxy-rl_miny)))
-          print("areas", img.shape[1]*img.shape[0], (rl_maxx-rl_minx) * (rl_maxy-rl_miny))
-          unlit_mean_v /= ((img.shape[0]*img.shape[1])-(rl_maxy-rl_miny)*(rl_maxx-rl_minx))
-          unlit_mean_v = int(abs(np.round(unlit_mean_v)))
-          unlit_mean_dif = int(abs(np.round(self.MeanLight - unlit_mean_v)))
-          print("MEANV, mean_v, rl_mean_v, unlit_mean_v:",self.MeanLight, mean_v, rl_mean_v, unlit_mean_v)
-          print("rl_mean_dif, unlit_mean_dif:",rl_mean_dif, unlit_mean_dif )
+# Now convert back into uint8, and make original image
+# center = np.uint8(center)
+# res = center[label.flatten()]
+# res2 = res.reshape((v.shape))
+# print("res2:", res2)
+# A = Z[label==0]
+# print("A:",A)
+# mask = Z[label==1]
+# img = Z[label != 1]
+# cv2.imshow('KMeans',res2)
+# cv2.waitKey(0)
+#        colors = np.zeros((1, cluster_n, 3), np.uint8)
+#        colors[0,:] = 255
+#        colors[0,:,0] = np.arange(0, 180, 180.0/cluster_n)
+#        colors = cv2.cvtColor(colors, cv2.COLOR_HSV2BGR)[0]
+#        for (x, y), label in zip(np.int32(Z), labels.ravel()):
+#            c = list(map(int, colors[label]))
+#            cv2.circle(img, (x, y), 1, c, -1)
+#####################3
+#      if self.MeanLightCnt > 10 or force_bb:
+#        mean_dif = int(abs(np.round(self.MeanLight - mean_v)))
+#        print("big change in lighting.  mean_dif:", mean_dif, self.MeanLight)
+#        if abs(mean_dif) > .1 * abs(self.MeanLight) or force_bb:
+#          # big light difference. Likely due the robot arm LED.
+#          orig = img.copy()
+#          gray = cv2.cvtColor(orig, cv2.COLOR_BGR2GRAY)
+#          # perform a naive attempt to find the (x, y) coordinates of
+#          # the area of the image with the largest intensity value
+#          # (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(gray)
+#          # display the results of the naive attempt
+#          # cv2.circle(img, maxLoc, 5, (255, 0, 0), 2)
+#          # cv2.imshow("Naive brightest spot", img)
+#          # apply a Gaussian blur to the image then find the brightest region
+#          # if diameter % 2 != 1:
+#          #   diameter += 1
+#          # radius = int(diameter/2 + 1)
+#
+#          # radius = int(min(gray.shape[0], gray.shape[1]) / 2) - 1
+#          radius = 5
+#          print("gray radius", radius)
+#          gray = cv2.GaussianBlur(gray, (radius, radius), 0)
+#          (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(gray)
+#          rl_img = orig.copy()
+#          cv2.circle(rl_img, maxLoc, 4, (255, 0, 0), 2)
+#          # display the results of our newly improved method
+#          cv2.imshow("Robust brightest spot", rl_img)
+#          cv2.waitKey(0)
+#
+#          # starting from the brightest point, find the radius of the robot LED light
+#          # maximum radius is distance to the edge of the image.
+#          max_radius = int(np.round(min([img.shape[0]-maxLoc[0], img.shape[1]-maxLoc[1],
+#                           maxLoc[0], maxLoc[1]])))
+#          print("radius:", max_radius, img.shape[0]-maxLoc[0], img.shape[1]-maxLoc[1],
+#                           maxLoc[0], maxLoc[1])
+#          # max_radius = int(np.round(min([img.shape[xy2hw(0)]-maxLoc[0], img.shape[xy2hw(1)]-maxLoc[1],
+#          #     maxLoc[0], maxLoc[1]])))
+#          min_radius = 5
+#          best_rl_mean_v = 0
+#          prev_rl_mean_v = 1/self.cfg.INFINITE
+#          rl_mean_dif = None
+#          best_robot_light_img = None
+#          best_robot_light_bounding_box = None
+#          max_v_dif = 0
+#          # compute mean light within radius, but don't count the corners of the
+#          # square that are beyond the radius
+#          for r_i, radius in enumerate(range(min_radius, max_radius)):
+#            diameter = radius * 2
+#            rl_minx = int(np.round(max(0, maxLoc[0] - radius)))
+#            rl_maxx = int(np.round(min(rl_img.shape[0],rl_minx + diameter)))
+#            # print("rlimgshaper, rlmaxx:", rl_img.shape[1],rl_minx + diameter)
+#            rl_miny = int(np.round(max(0, maxLoc[1] - radius)))
+#            rl_maxy = int(np.round(min(rl_img.shape[1],rl_miny + diameter)))
+#            robot_light_bounding_box = [[[rl_minx, rl_miny]],[[rl_minx, rl_maxy]], [[rl_maxx, rl_maxy]], [[rl_maxx, rl_miny]]]
+#
+#            # there are cases where the light results in an elyptical shape (not round).
+#            # ex1: the light is partially on the cube, and casts a shadow on the 
+#            #      ground before the rest of the light is on the ground.
+#            # ex2: A round shape is only when gripper lowered from above.
+#            #      What if the object is grabbed from the side or diagnal?
+#            #
+#            # We want mean light within radius to be counted
+#
+#            # print(r_i,"robot_light_bounding_box:", robot_light_bounding_box)
+#            # print(r_i,"rlmaxy, rlminy, rlmaxx, rlminx:",rl_maxy, rl_miny, rl_maxx, rl_minx)
+#            robot_light_img = np.zeros((rl_maxy-rl_miny, rl_maxx-rl_minx, 3),dtype="uint8")
+#            # print("img.shape:", img.shape, rl_maxy-rl_miny, rl_maxx-rl_minx)
+#            robot_light_img[0:rl_maxy-rl_miny, 0:rl_maxx-rl_minx,:] = img[rl_miny:rl_maxy, rl_minx:rl_maxx,:]
+#
+#            # find mean dif in brightest spots
+#            robot_light_hsv  = cv2.cvtColor(robot_light_img.copy(), cv2.COLOR_BGR2HSV)
+#            rl_h, rl_s, rl_v = cv2.split(robot_light_hsv)
+#            # rl_mean_v = cv2.mean(rl_v)[0]
+#            inside_radius = []
+#            outside_radius = []
+#            for x in range(rl_maxx-rl_minx):
+#              for y in range(rl_maxy-rl_miny):
+#                if np.sqrt(x*x + y*y) <= radius-1:
+#                  inside_radius.append(1.0*rl_v[x,y])  # make float (not uint8)
+#                if np.sqrt(x*x + y*y) > radius-1:
+#                  outside_radius.append(1.0*rl_v[x,y])  # make float (not uint8)
+#            rl_inside_mean_v = statistics.mean(inside_radius)
+#            rl_outside_mean_v = statistics.mean(outside_radius)
+#            rl_mean_v = statistics.mean(inside_radius+outside_radius)
+#            print(r_i, "rl mean v: inside/outside:", rl_inside_mean_v, rl_outside_mean_v, rl_mean_v)
+#            # (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(gray)
+#            # mean_v_dif = (rl_mean_v - prev_rl_mean_v) / prev_rl_mean_v
+#            # print(r_i,"mean_dif", max_v_dif, mean_v_dif, rl_mean_v, prev_rl_mean_v)
+#            # mean_dif = int(abs(np.round(self.MeanLight - rl_mean_v)))
+#            # if abs(mean_dif) > .4 * abs(self.MeanLight) and mean_v_dif < 0 and r_i > 5:
+#            if abs(rl_outside_mean_v/rl_inside_mean_v) < 1 and r_i >= 5:
+#              # bigger sudden decrease in robot light
+#              # print("RL decrease:", mean_dif/self.MeanLight, mean_dif, self.MeanLight)
+#              # print("RL decrease:",mean_v_dif, max_v_dif, mean_v_dif, self.MeanLight)
+#              print("RL decrease:",abs(rl_outside_mean_v/rl_inside_mean_v))
+#              rl_mean_dif = int(abs(np.round(self.MeanLight - rl_mean_v)))
+#              break
+#            else:
+#              best_rl_mean_v = rl_mean_v
+#              best_robot_light_img = robot_light_img.copy()
+#              best_robot_light_bounding_box = robot_light_bounding_box.copy()
+#            
+#              rl_mean_dif = int(abs(np.round(self.MeanLight - rl_mean_v)))
+#              adjusted_rl_v = rl_v.copy()
+#              adjusted_rl_v[adjusted_rl_v <= rl_mean_dif] = 0
+#              adjusted_rl_v[adjusted_rl_v > rl_mean_dif] -= rl_mean_dif
+#            # if abs(mean_v_dif) > abs(max_v_dif):
+#            #   max_v_dif = mean_v_dif
+#            # prev_rl_mean_v = rl_mean_v
+#
+#            # we've failed to compute the robot light image
+#            # print("FAILED TO COMPUTE THE ROBOT LIGHT IMAGE")
+#            # rl_mean_v = 0
+#            # rl_mean_dif = 0
+#            # robot_light_bounding_box = None
+#
+#          print("best_robot_light_bb:", best_robot_light_bounding_box)
+#          # compute mean outside region
+#
+#          if best_robot_light_bounding_box is not None:
+#            rl_maxx, rl_minx, rl_maxy, rl_miny = get_min_max_borders(best_robot_light_bounding_box)
+#            unlit_mean_v = mean_v * img.shape[0] * img.shape[1] - best_rl_mean_v * (rl_maxy-rl_miny) * (rl_maxx-rl_minx)
+#          # unlit_mean_v /= ((img.shape[1]-(rl_maxx-rl_minx)) * (img.shape[0]-(rl_maxy-rl_miny)))
+#            print("areas", img.shape[1]*img.shape[0], (rl_maxx-rl_minx) * (rl_maxy-rl_miny))
+#            unlit_mean_v /= ((img.shape[0]*img.shape[1])-(rl_maxy-rl_miny)*(rl_maxx-rl_minx))
+#          else:
+#            unlit_mean_v = mean_v
+#
+#          unlit_mean_v = int(abs(np.round(unlit_mean_v)))
+#          unlit_mean_dif = int(abs(np.round(self.MeanLight - unlit_mean_v)))
+#          print("MEANV, mean_v, rl_mean_v, unlit_mean_v:",self.MeanLight, mean_v, best_rl_mean_v, unlit_mean_v)
+#          print("rl_mean_dif, unlit_mean_dif:",rl_mean_dif, unlit_mean_dif )
+#
+#          # adjust mean lights
+#          lim = 255 - unlit_mean_dif
+#          unlit_v = v.copy()
+#          unlit_v[unlit_v > lim] = 255
+#          unlit_v[unlit_v <= lim] += unlit_mean_dif
+#          # ValueError: could not broadcast input array from shape (54,54) into shape (75,54)
+#          # print("rl_miny,rl_maxy, (rl_maxy-rl_miny):", rl_miny,rl_maxy, (rl_maxy-rl_miny))
+#          # Too discontinuous
+#          # unlit_v[rl_miny:rl_maxy, rl_minx:rl_maxx] = adjusted_rl_v[0:(rl_maxy-rl_miny), 0:(rl_maxx-rl_minx)]
+#
+#          final_hsv = cv2.merge((h, s, unlit_v))
+#          adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
+#          # cv2.imshow("Best Robot Light bb ", best_robot_light_img)
+#          # cv2.imshow("Light Adjusted Image", adjusted_img)
+#          # cv2.imshow("Orig Image", img)
+#          # cv2.waitKey(0)
+#          return adjusted_img, mean_dif, best_robot_light_bounding_box
+#
+#        elif abs(mean_dif) > .06 * abs(self.MeanLight):
+#          lim = 255 - mean_dif
+#          v[v > lim] = 255
+#          v[v <= lim] += mean_dif
+#
+#          final_hsv = cv2.merge((h, s, v))
+#          adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
+#          # cv2.imshow("Orig Image", img)
+#          # cv2.imshow("Light Adjusted Image", adjusted_img)
+#          # cv2.waitKey(0)
+#      return adjusted_img, mean_dif, None
 
-          # adjust mean lights
-          lim = 255 - unlit_mean_dif
-          unlit_v = v.copy()
-          unlit_v[unlit_v > lim] = 255
-          unlit_v[unlit_v <= lim] += unlit_mean_dif
-          # ValueError: could not broadcast input array from shape (54,54) into shape (75,54)
-          print("rl_miny,rl_maxy, (rl_maxy-rl_miny):", rl_miny,rl_maxy, (rl_maxy-rl_miny))
-          # Too discontinuous
-          # unlit_v[rl_miny:rl_maxy, rl_minx:rl_maxx] = adjusted_rl_v[0:(rl_maxy-rl_miny), 0:(rl_maxx-rl_minx)]
+  def mean_sq_err(self, imageA, imageB):
+      # the 'Mean Squared Error' between the two images is the
+      # sum of the squared difference between the two images;
+      # NOTE: the two images must have the same dimension
+      # print("np.sum diff sqr", err)
+      # Normalized Least Squared Error
+      if True:
+        err = np.sum((imageA.astype("float") - imageB.astype("float")) ** 2)
+        err /= np.sum((imageA.astype("float")) ** 2)
+      elif False and rl is not None:
+        # rl is a kmeans label representing the robot light cluster
+        err = np.sum((imageA.astype("float")[rl["LABEL"]!=rl["LIGHT"]] - imageB.astype("float")[rl["LABEL"]!=1]) ** 2)
+        err /= np.sum((imageA.astype("float")[rl["LABEL"]!=rl["LIGHT"]]) ** 2)
 
-          final_hsv = cv2.merge((h, s, unlit_v))
-          adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
-          # cv2.imshow("Orig Image", img)
-          # cv2.imshow("Light Adjusted Image", adjusted_img)
-          # cv2.waitKey(0)
-          return adjusted_img, mean_dif, robot_light_bounding_box
-
-        elif abs(mean_dif) > .06 * abs(self.MeanLight):
-          lim = 255 - mean_dif
-          v[v > lim] = 255
-          v[v <= lim] += mean_dif
-
-          final_hsv = cv2.merge((h, s, v))
-          adjusted_img = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2BGR)
-          # cv2.imshow("Orig Image", img)
-          # cv2.imshow("Light Adjusted Image", adjusted_img)
-          # cv2.waitKey(0)
-      return adjusted_img, mean_dif, None
+#        print("cpimg:",imageA.shape, exclude_bb)
+#        exclude_imgA = get_bb_img(imageA, exclude_bb)
+#        exclude_imgB = get_bb_img(imageB, exclude_bb)
+#        maxw, minw, maxh, minh = get_min_max_borders(exclude_bb)
+#        print("cpimg:",imageA.shape, maxw, minw, maxh, minh)
+#        # cv2.imshow('b4 eximga',exclude_imgA)
+#        # cv2.imshow('b4 eximgb',exclude_imgB)
+#        exclude_imgA = cv2.copyMakeBorder(exclude_imgA, 
+#                       top=minh, bottom=imageA.shape[0] - maxh,
+#                       left=minw, right=imageA.shape[1] - maxw,
+#                       borderType=cv2.BORDER_CONSTANT, value=[0, 0, 0])  # black
+#        exclude_imgB = cv2.copyMakeBorder(exclude_imgB, 
+#                       top=minh, bottom=imageB.shape[0] - maxh,
+#                       left=minw, right=imageB.shape[1] - maxw,
+#                       borderType=cv2.BORDER_CONSTANT, value=[0, 0, 0])  # black
+#        # print("imgA:", imageA.shape[0] - maxw, imageA.shape, exclude_imgA.shape, maxh, maxw)
+#        # print("imgB:", imageB.shape[0] - maxw, imageB.shape, exclude_imgB.shape, maxh, maxw)
+#        cv2.imshow('eximga',exclude_imgA)
+#        # cv2.imshow('eximgb',exclude_imgB)
+#        cv2.imshow('imga',imageA)
+#        # cv2.imshow('imgb',imageB)
+#        # k = cv2.waitKey(0)
+#        includedErr = np.sum(((imageA.astype("float") - exclude_imgA.astype("float"))
+#                    - (exclude_imgB.astype("float") - exclude_imgB.astype("float"))) ** 2)
+#        includedA = imageA.astype("float") - exclude_imgA.astype("float") 
+#        err = (includedErr) / np.sum(includedA ** 2)
+      else:
+        # debug: compare slow way results to fast way
+        mse_sum = 0.0
+        mse_sum3 = 0.0
+        mse_sumA = 0.0
+        mse_cnt = 0
+        zero_cnt = 0
+        zero_cntA = 0
+        zero_cntB = 0
+        for h in range(imageA.shape[0]):
+          for w in range(imageA.shape[1]):
+              if (self.is_black(imageA[h,w].astype("float")) and 
+                  self.is_black(imageB[h,w].astype("float"))):
+                zero_cnt +=1
+              elif (self.is_black(imageA[h,w].astype("float")) and 
+                    self.is_black(imageB[h,w].astype("float"))):
+                zero_cntA +=1
+              elif (self.is_black(imageA[h,w].astype("float")) and 
+                    self.is_black(imageB[h,w].astype("float"))):
+                zero_cntB +=1
+              else:
+                mse_sum += np.sum((imageA[h,w].astype("float") - imageB[h,w].astype("float"))**2)
+                mse_cnt += 1
+                mse_sumA += np.sum((imageA[h,w].astype("float"))**2)
+                mse_err = mse_sum / mse_sumA
+        err = np.sum((imageA.astype("float") - imageB.astype("float")) ** 2)
+        err /= np.sum((imageA.astype("float")) ** 2)
+        print("mse cnts: AB, A, B, mse:", zero_cnt, zero_cntA, zero_cntB, mse_cnt)
+        print("mse_err: ", mse_err, err)
+        # err = np.sum((imageA.astype("float") - imageB.astype("float")) ** 2)
+        # err /= np.sum((imageA.astype("float")) ** 2)
+      # print("mse shape", float(imageA.shape[0] * imageA.shape[1]), np.sum((imageA.astype("float")) ** 2))
+      # return the MSE, the lower the error, the more "similar"
+      # the two images are
+      return err
+  
+  def is_black(self, pixel):
+      if pixel[0] == 0 and pixel[1] == 0 and pixel[2] == 0:
+        return True
+      return False
 
 # from: https://stackoverflow.com/questions/45531074/how-to-merge-lines-after-houghlinesp
 class HoughBundler:
@@ -924,4 +1109,5 @@ class HoughBundler:
                     merged_lines_all.extend(merged_lines)
 
         return merged_lines_all
+
 

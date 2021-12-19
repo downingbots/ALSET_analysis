@@ -67,6 +67,9 @@ def hw_to_xy(A):
 def xy_to_hw(A):
     return [A[1],A[0]]
 
+def xy2hw(xy):
+    return 1-xy
+
 # angle = int(math.atan((y1-y2)/(x2-x1))*180/math.pi)
 # image is "new map" == the transformed "curr move" with border
 # center is about 4xfinger pads -> robot_location
@@ -180,6 +183,7 @@ def real_map_border(mapimg, ret_outside=True):
 def get_min_max_borders(border):
     b = []
     for bdr in border:
+      # b.append(list(map(float, bdr[0])))
       b.append(list(bdr[0]))
     poly = Polygon(b)
     minw, minh, maxw, maxh = poly.bounds
@@ -264,6 +268,7 @@ def rm_borders(img):
 def bounding_box_center(bb):
     bb_p = border_to_polygon(bb)
     center = [bb_p.centroid.x,bb_p.centroid.y]
+    # print("bb center", bb, bb_p, center)
     return center
 
 def border_to_polygon(border, bufzone=0):
@@ -291,6 +296,7 @@ def border_to_polygon(border, bufzone=0):
     return poly
 
 def border_radius(border):
+    INFINITE = 1000000000000000000
     poly = border_to_polygon(border)
     cent = poly.centroid
     minradius = INFINITE
@@ -636,6 +642,9 @@ def image_in_border(border, image):
     # cv2.waitKey(0)
     return final_image
 
+def point_in_light(pt, rl):
+    return rl["LABEL"][pt[0]*224+pt[1]] == rl["LIGHT"]
+
 def point_in_border(border, pt, bufzone=10):
     # Create Point objects
     poly = border_to_polygon(border, bufzone)
@@ -670,3 +679,230 @@ def check_gripper_bounding_box(max_bb, test_bb):
     if test_bb_p.within(max_bb_p):
       return True
     return False
+
+def expand_bb(bb, ratio):
+    maxw, minw, maxh, minh = get_min_max_borders(bb)
+    maxw *= ratio
+    maxh *= ratio
+    minw /= ratio
+    minh /= ratio
+    new_bb=[[[int(round(minw)), int(round(minh))]],[[int(round(minw)), int(round(maxh))]],
+           [[int(round(maxw)), int(round(maxh))]], [[int(round(maxw)), int(round(minh))]]]
+    return new_bb
+
+def center_bb(bb, wctr=None, hctr=None):
+    # 224, INFINITE are magic numbers that can be removed by loading config.py,
+    # but seems like overkill...
+    bbctr = bounding_box_center(bb)
+    newbb = copy.deepcopy(bb)
+    d = [0,0]
+    if wctr is not None:
+      d[0] = wctr - int(bbctr[0])
+    elif hctr is not None:
+      d[1] = hctr - int(bbctr[1])
+    for i in range(4):
+      for j in range(2):
+        if newbb[i][0][j] + d[j] < 0:
+          d[j] = 0 - newbb[i][0][j]
+        elif newbb[i][0][j] + d[j] > 223:
+          d[j] = 223 - newbb[i][0][j]
+    # print("newbb,d[j]: ", newbb, d[j])
+    for i in range(4):
+      for j in range(2):
+        newbb[i][0][j] += d[j]
+    # print("center_bb", wctr, newbb, bb, bbctr)
+    return newbb
+
+# with limit_width = True, pass in full_frame_img
+# with limit_width == False, pass in just the object img, but probably a bug on left width
+def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False):
+    INFINITE = 1000000000000000000
+    gray_img = cv2.cvtColor(obj_img, cv2.COLOR_BGR2GRAY)
+    gray_img = cv2.Canny(gray_img, 50, 200, None, 3)
+    # thresh = 10
+    thresh = 20
+    gray_img = cv2.GaussianBlur(gray_img, (5, 5), 0)
+    gray_img = cv2.dilate(gray_img,None,iterations = 2)
+    gray_img = cv2.threshold(gray_img, thresh, 255, cv2.THRESH_BINARY_INV)[1]
+    # gray_img = cv2.bitwise_not(gray_img)
+    imagecontours, hierarchy = cv2.findContours(gray_img,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
+    if len(imagecontours) > 1:
+      # print("hierarchy:", hierarchy)
+      for i, c  in enumerate(imagecontours):
+        area = cv2.contourArea(c)
+        M = cv2.moments(c)
+        print(i, "area, moment:", area, M, len(c))
+        print(i, "area:", area, len(c))
+
+    # compute across all the Approx Poly edges withing between_gripper_obj image
+    obj_minx = INFINITE
+    obj_miny = INFINITE
+    obj_maxx = 0
+    obj_maxy = 0
+    for count in imagecontours:
+      # epsilon = 0.01 * cv2.arcLength(count, True)
+      epsilon = 0.01 * cv2.arcLength(count, True)
+      approximations = cv2.approxPolyDP(count, epsilon, True)
+      # e.g. [[[224 224]] [[252 372]] [[420 372]] [[447 224]]]
+      # the name of the detected shapes are written on the image
+      print("Approx Poly edges:", len(approximations))
+      # print("Approx Poly", approximations)
+      area = cv2.contourArea(approximations)
+      obj_contours = gray_img.copy()
+      cv2.drawContours(obj_contours, count, -1, (0,255,0), 3)
+      cv2.imshow("contours", obj_contours)
+      # cv2.waitKey()
+      maxx, minx, maxy, miny = get_min_max_borders(obj_bb)
+      for pt in approximations:
+        # skip corners, note shape xy, pt hw are reversed
+        if pt[0][0] in [0, obj_img.shape[xy2hw(0)]-1] and pt[0][1] in [0, obj_img.shape[xy2hw(1)]-1]:
+          continue
+        # print(pt[0], end=" ")
+        if limit_width and minx <= pt[0][0] and obj_minx > pt[0][0]:
+          # if rl is None or not (pt[0] in [rl["LABEL"]==rl["LIGHT"]]):
+          if rl is None or not point_in_light(pt[0], rl):
+            obj_minx = pt[0][0]
+            if obj_miny > pt[0][1]:
+              obj_miny = pt[0][1]
+          else:
+            print("rl: skip pt ", pt[0])
+        elif not limit_width:
+          if obj_minx > pt[0][0]:
+            obj_minx = pt[0][0]
+          if obj_miny > pt[0][1]:
+            obj_miny = pt[0][1]
+        else:
+          print("contour: skip pt ", pt[0])
+        if limit_width and maxx >= pt[0][0] and obj_maxx < pt[0][0]:
+          # if rl is None or not point_in_border(rl["CENTER"], pt[0], bufzone=0):
+          # print("contour: rl label:", [rl["LABEL"]==rl["LIGHT"]])
+          if rl is None or not point_in_light(pt[0], rl):
+            obj_maxx = pt[0][0]
+            if obj_maxy < pt[0][1]:
+              obj_maxy = pt[0][1]
+        elif not limit_width:
+          if obj_maxx < pt[0][0]:
+            obj_maxx = pt[0][0]
+          if obj_maxy < pt[0][1]:
+            obj_maxy = pt[0][1]
+        else:
+          print("contour: skip pt ", pt[0])
+      # TODO: rl overlap; move size
+      #
+      #
+      #
+      # print("")
+      print("object bounds/sz:", [[obj_minx,obj_miny],[obj_maxx,obj_maxy]], [obj_maxx-obj_minx,obj_maxy-obj_miny],obj_img.shape)
+      if obj_maxx-obj_minx <= 0 or obj_maxy-obj_miny <= 0:
+        continue
+
+    if obj_miny != INFINITE:
+      if limit_width:
+        cropped_obj_bb=[[[obj_minx,obj_miny]],[[obj_minx,obj_maxy]],
+                        [[obj_maxx,obj_maxy]], [[obj_maxx,obj_miny]]]
+      else:
+        cropped_obj_bb=[[[obj_minx+minx,obj_miny+miny]],[[obj_minx+minx,obj_maxy+miny]],
+                        [[obj_maxx+minx,obj_maxy+miny]], [[obj_maxx+minx,obj_miny+miny]]]
+    else:
+      print("WARNING: cropping of obj_bb failed")
+      cropped_obj_bb = copy.deepcopy(obj_bb)
+    return cropped_obj_bb
+      
+
+def get_bb_img(orig_img, bb):
+    # print("bb:", bb, orig_img.shape)
+    maxw, minw, maxh, minh = get_min_max_borders(bb)
+    try:
+      orig_maxh, orig_maxw, c = orig_img.shape
+      maxh = min(maxh, orig_maxh)
+      maxw = min(maxw, orig_maxw)
+      if maxh<minh or maxw<minw:
+        return None
+      bb_img = np.zeros((maxh-minh, maxw-minw, 3), dtype="uint8")
+      bb_img[0:maxh-minh, 0:maxw-minw, :] = orig_img[minh:maxh, minw:maxw, :]
+    except:
+      try:
+        orig_maxh, orig_maxw = orig_img.shape
+      except:
+        print("orig_img shape:",orig_img.shape)
+        orig_maxh, orig_maxw, c = orig_img.shape
+      minh = min(minh, orig_maxh)
+      minw = min(minw, orig_maxw)
+      maxh = min(maxh, orig_maxh)
+      maxw = min(maxw, orig_maxw)
+      # print("maxh-minh, maxw-minw:",maxh-minh, maxw-minw,  maxw, minw, maxh, minh )
+      if maxh<minh or maxw<minw:
+        return None
+      bb_img = np.zeros((maxh-minh, maxw-minw), dtype="uint8")
+      bb_img[0:maxh-minh, 0:maxw-minw] = orig_img[minh:maxh, minw:maxw]
+    return bb_img
+
+def max_bb(bb1, bb2):
+    bb1_maxw, bb1_minw, bb1_maxh, bb1_minh = get_min_max_borders(bb1)
+    bb2_maxw, bb2_minw, bb2_maxh, bb2_minh = get_min_max_borders(bb2)
+    bb1_maxw = max(bb1_maxw, bb2_maxw)
+    bb1_minw = min(bb1_minw, bb2_minw)
+    bb1_maxh = max(bb1_maxh, bb2_maxh)
+    bb1_minh = min(bb1_minh, bb2_minh)
+    bb_min=[[[bb1_minw,bb1_minh]],[[bb1_minw,bb1_maxh]],
+            [[bb1_maxw,bb1_maxh]],[[bb1_maxw,bb1_minh]]]
+    return bb_min
+
+def min_bb(bb1, bb2):
+    bb1_maxw, bb1_minw, bb1_maxh, bb1_minh = get_min_max_borders(bb1)
+    bb2_maxw, bb2_minw, bb2_maxh, bb2_minh = get_min_max_borders(bb2)
+    bb1_maxw = min(bb1_maxw, bb2_maxw)
+    bb1_minw = max(bb1_minw, bb2_minw)
+    bb1_maxh = min(bb1_maxh, bb2_maxh)
+    bb1_minh = max(bb1_minh, bb2_minh)
+    bb_min=[[[bb1_minw,bb1_minh]],[[bb1_minw,bb1_maxh]],
+            [[bb1_maxw,bb1_maxh]],[[bb1_maxw,bb1_minh]]]
+    return bb_min
+
+# E.G.: rel_bb to exclude the robot light (bb2) from an image of a cube (bb1)
+def relative_bb(bb1, bb2):
+    bb1_maxw, bb1_minw, bb1_maxh, bb1_minh = get_min_max_borders(bb1)
+    bb2_maxw, bb2_minw, bb2_maxh, bb2_minh = get_min_max_borders(bb2)
+    # print("bb1:", bb1)
+    # print("bb2:", bb2)
+    if bb2_minw>bb1_maxw or bb1_minw>bb2_maxw or bb2_minh>bb1_maxh or bb1_minh>bb2_maxh:
+      return None
+    if bb1_minw >= bb2_minw:
+      rel_minw = 0
+    else:
+      rel_minw = bb2_minw - bb1_minw
+    if bb1_minh >= bb2_minh:
+      rel_minh = 0
+    else:
+      rel_minh = bb2_minh - bb1_minh
+    if bb1_maxw >= bb2_maxw:
+      rel_maxw = bb2_maxw - bb1_minw
+    else:
+      rel_maxw = bb1_maxw - bb1_minw
+    if bb1_maxh >= bb2_maxh:
+      rel_maxh = bb2_maxh - bb1_minh
+    else:
+      rel_maxh = bb1_maxh - bb1_minh
+    area_bb1 = (bb1_maxw-bb1_minw)*(bb1_maxh-bb1_minh)
+    area_rel = (rel_maxw-rel_minw)*(rel_maxh-rel_minh)
+    if area_rel > .5*area_bb1:
+      reduce_side = int(np.sqrt(area_rel - .5*area_bb1) / 4)
+      print("excluded area too big.", area_rel, area_bb1, reduce_side)
+      # trimming should be based upon center. Shortcut for debugging.
+      # bb2_center = bounding_box_center(bb2)
+      rel_minw += reduce_side
+      rel_minh += reduce_side
+      rel_maxw -= reduce_side
+      rel_maxh -= reduce_side
+    rel_bb=[[[rel_minw,rel_minh]],[[rel_minw,rel_maxh]],
+            [[rel_maxw,rel_maxh]],[[rel_maxw,rel_minh]]]
+#    bb1_sz_w = bb1_maxw - bb1_minw
+#    bb1_sz_h = bb1_maxh - bb1_minh
+#    bb2_sz_w = bb2_maxw - bb2_minw
+#    bb2_sz_h = bb2_maxh - bb2_minh
+#    rel_sz_w = rel_maxw - rel_minw
+#    rel_sz_h = rel_maxh - rel_minh
+#    print("rel max min w h", rel_maxw, rel_minw, rel_maxh, rel_minh)
+#    print("bb1,bb2,rel sz", (bb1_sz_w, bb1_sz_h), (bb2_sz_w, bb2_sz_h), (rel_sz_w, rel_sz_h))
+    return rel_bb
+
