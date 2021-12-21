@@ -459,7 +459,7 @@ class AlsetState():
       # apply new filter to old cube img
       # obj_no_rl_img = self.filter_rl_from_bb_img(obj_bb, obj_img, rl)
       obj_mean_rl_img = self.filter_rl_from_bb_img(obj_bb, obj_img, obj_rl)
-      cv2.imshow("1BB Robot Light filter", obj_mean_rl_img)
+      # cv2.imshow("1BB Robot Light filter", obj_mean_rl_img)
       min_mse = self.cfg.INFINITE
       best_obj_bb  = None
       best_obj_img = None
@@ -489,9 +489,13 @@ class AlsetState():
             new_obj_mean_rl_img = self.filter_rl_from_bb_img(new_obj_bb, new_obj_img, new_rl)
             # apply new filter to new cube img
             # new_obj_no_rl_img = self.filter_rl_from_bb_img(new_obj_bb, new_obj_img, rl)
-            # cv2.imshow("new_obj_img1", new_obj_img)
+            # if self.target is not None:
+            #   cv2.imshow("new_obj_img", new_obj_mean_rl_img)
+            #   cv2.waitKey(0)
             # cv2.imshow("full_img", full_img)
             # print("new/prev obj img/bb2:", new_obj_img.shape, exclude_bb)
+            # print("new :", new_obj_bb, new_obj_mean_rl_img)
+            # print("prev:", obj_bb, obj_mean_rl_img)
             print("new :", new_obj_bb)
             print("prev:", obj_bb)
             # compare the newly computed "new_obj_img" with the desired "obj_img"
@@ -541,13 +545,17 @@ class AlsetState():
         contour_bb = get_contour_bb(full_img, best_obj_bb, full_rl, limit_width=True)
         if contour_bb is not None:
           print("contour_bb:", contour_bb)
+          print("best_obj_bb:", best_obj_bb, min_mse)
           new_obj_bb = max_bb(contour_bb, best_obj_bb)
-          contour_img = get_bb_img(full_img, contour_bb)
-          new_obj_img = get_bb_img(full_img, new_obj_bb)
-          # cv2.imshow("best img", best_obj_img)
-          # cv2.imshow("contour img", contour_img)
-          # cv2.imshow("new img", new_obj_img)
-          # cv2.waitKey(0)
+          try:
+            contour_img = get_bb_img(full_img, contour_bb)
+            cv2.imshow("contour img", contour_img)
+          except:
+            pass
+          # new_obj_img = get_bb_img(full_img, new_obj_bb)
+          cv2.imshow("best img", best_obj_img)
+          cv2.imshow("full img", full_img)
+          cv2.waitKey(0)
           # best_obj_bb  = new_obj_bb
           # best_obj_img = new_obj_img
 
@@ -776,10 +784,11 @@ class AlsetState():
             print("rgbb:",rgbb)
             cube_size2 = puc["CUBE_SIZE"]
 
-            cube_top_left  = [int(max(lgbb[2][0][0] - cube_size2/2,0)),int(lgbb[1][0][1] + cube_size2/2)]
-            cube_top_right = [int(rgbb[0][0][0] + cube_size2/2),int(lgbb[1][0][1] + cube_size2/2)]
-            cube_bot_left  = [int(max(lgbb[2][0][0] - cube_size2/2,0)),int(max(lgbb[0][0][1] - cube_size2/2,0))]
-            cube_bot_right = [int(rgbb[0][0][0] + cube_size2/2),int(max(rgbb[0][0][1] - cube_size2/2,0))]
+            multiplier = .5
+            cube_top_left  = [int(max(lgbb[2][0][0] - cube_size2*multiplier,0)),int(lgbb[1][0][1] + cube_size2*multiplier)]
+            cube_top_right = [int(rgbb[0][0][0] + cube_size2*multiplier),int(lgbb[1][0][1] + cube_size2*multiplier)]
+            cube_bot_left  = [int(max(lgbb[2][0][0] - cube_size2*multiplier,0)),int(max(lgbb[0][0][1] - cube_size2*multiplier,0))]
+            cube_bot_right = [int(rgbb[0][0][0] + cube_size2*multiplier),int(max(rgbb[0][0][1] - cube_size2*multiplier,0))]
 
             if (cube_top_left[0] >= rgmaxw / 2 - 5):
               print("adj cube 1a")
@@ -798,8 +807,8 @@ class AlsetState():
                 print("adj cube 2")
             if (cube_top_right[0] <= cube_top_left[0] + 5):
               print("adj cube 3a")
-              new_cube_lw = int(rgmaxw/2 - cube_size/2)
-              new_cube_rw = int(rgmaxw/2 + cube_size/2)
+              new_cube_lw = int(rgmaxw*multiplier - cube_size*multiplier)
+              new_cube_rw = int(rgmaxw*multiplier + cube_size*multiplier)
               if (cube_top_right[0] < new_cube_rw):
                 cube_top_left[0]  = new_cube_lw
                 cube_bot_right[0] = new_cube_rw
@@ -809,6 +818,7 @@ class AlsetState():
 
             cube_bb        = [[cube_bot_left],[cube_bot_right],
                               [cube_top_left],[cube_top_right]]
+
             # make an immutable copy. This bb is further processed to translate
             # cube space into full_space.
             cube_betw_gripper_full_img_space = copy.deepcopy(cube_bb)
@@ -959,6 +969,10 @@ class AlsetState():
           next_img,next_mean_diff,next_rl=self.cvu.adjust_light(next_img_path)
           next_cube_bb = self.get_bb("CUBE", frame_num=fr_num+1)
           next_cube_img = get_bb_img(next_img, next_cube_bb)
+          if fr_num == 173:
+            cv2.destroyAllWindows()
+            # self.target = True
+            # cv2.imshow("CURR IMG", curr_img)
 
           #################################
           # Estimate Movement via Keypoints
@@ -1025,7 +1039,7 @@ class AlsetState():
               mv_dif_y =  0
             elif mv_rot is not None:
               curr_cube_ctr = bounding_box_center(curr_cube_bb)
-              robot_pos = [(-self.MAP_ROBOT_H_POSE / (self.BIRDS_EYE_RATIO_H+1)), int(next_img.shape[0]/2) ]
+              robot_pos = [(-self.MAP_ROBOT_H_POSE / (self.BIRDS_EYE_RATIO_H+1)), int(next_img.shape[0]*multiplier) ]
               next_angle = rad_arctan2(curr_cube_ctr[0]-robot_pos[0], curr_cube_ctr[1]-robot_pos[1])
               curr_angle = next_angle + mv_rot
               dist = np.sqrt((curr_cube_ctr[0] - robot_pos[0])**2 + (curr_cube_ctr[1] - robot_pos[1])**2)
@@ -1065,6 +1079,28 @@ class AlsetState():
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
               search_dir = "HORIZ"
             mse_best_obj_bb, mse_best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, next_cube_bb, next_rl, next_cube_img, curr_rl, curr_img, search_dir)
+
+            # now tweak to allow some recentering
+            RECENTER_PIX = 30  # check 10 pixels on each side
+            if action.startswith("UPPER_ARM") or action.startswith("LOWER_ARM"):
+              w_h = 0  # width
+              search_dir = "HORIZ"
+              low_val  = next_minw - int(RECENTER_PIX)
+              if low_val < int(next_cube_img.shape[w_h]/2):
+                low_val = int(next_cube_img.shape[w_h]/2)
+              high_val = next_maxw + int(RECENTER_PIX)
+              if high_val > 223 - int(next_cube_img.shape[w_h]/2):
+                high_val = 223 - int(next_cube_img.shape[w_h]/2)
+            elif action.startswith("GRIPPER"):
+              w_h = 1  # height
+              low_val  = next_minh - int(RECENTER_PIX)
+              if low_val < int(next_cube_img.shape[w_h]/2):
+                low_val = int(next_cube_img.shape[w_h]/2)
+              high_val = next_maxh + int(RECENTER_PIX)
+              if high_val > 223 - int(next_cube_img.shape[w_h]/2):
+                high_val = 223 - int(next_cube_img.shape[w_h]/2)
+              search_dir = "VERT"
+            mse_best_obj_bb, mse_best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, mse_best_obj_bb, next_rl, mse_best_obj_img, curr_rl, curr_img, search_dir)
 
             ###############
             # record MSE best cube and LBP
@@ -1334,7 +1370,7 @@ class AlsetState():
         event_state["ROBOT_LIGHT_MEAN_HSV"] = [rl_mean_h, rl_mean_s, rl_mean_v]
 
       fwdpass_obj_bb = get_contour_bb(obj_img, obj_bb)
-      print("fwdpass_obj_bb", fwdpass_obj_bb,)
+      print("fwdpass_obj_bb", fwdpass_obj_bb)
       fwdpassobj_label = "FWDPASS_" + obj_name + "_BB"  # forward pass only
       self.record_bounding_box([fwdpassobj_label], fwdpass_obj_bb, frame_num=frame_num)
 
@@ -1563,30 +1599,40 @@ class AlsetState():
       bb_maxw, bb_minw, bb_maxh, bb_minh = get_min_max_borders(bb)
       bb_mask = np.zeros((bb_maxh-bb_minh, bb_maxw-bb_minw), dtype="uint8")
       bb_mask[0:bb_maxh-bb_minh,0:bb_maxw-bb_minw]=mask[bb_minh:bb_maxh,bb_minw:bb_maxw]
-      try:
-        # if color
+      # try:
+      if True:
+        rl_img_hsv  = cv2.cvtColor(rl_img.copy(), cv2.COLOR_BGR2HSV)
+        rl_h, rl_s, rl_v = cv2.split(rl_img_hsv)
+        # rl_mean_h = cv2.mean(rl_h)[0]
+        # rl_mean_s = cv2.mean(rl_s)[0]
+        rl_mean_v = cv2.mean(rl_v)[0]
+
         nonlight = 1 - rl["LIGHT"]
-        mean_nonlight_color    = [0,0,0]
-        mean_nonlight_color[0] = np.mean(rl_img[bb_mask==nonlight,0])
-        mean_nonlight_color[1] = np.mean(rl_img[bb_mask==nonlight,1])
-        mean_nonlight_color[2] = np.mean(rl_img[bb_mask==nonlight,2])
-        print("3 mean nonlight color ", mean_nonlight_color, nonlight, rl["LIGHT"])
+        print("light cnt in bb:", nonlight, np.count_nonzero(bb_mask), len(bb_mask)*len(bb_mask[0]), bb)
+        # mean_nonlight_color    = [0,0,0]
+        # mean_nonlight_color[0] = np.mean(rl_img[bb_mask==nonlight,0])
+        # mean_nonlight_color[1] = np.mean(rl_img[bb_mask==nonlight,1])
+        # mean_nonlight_color[2] = np.mean(rl_img[bb_mask==nonlight,2])
+        # print("3 mean nonlight color ", mean_nonlight_color, nonlight, rl["LIGHT"])
+        nonlight_mean_v = np.mean(rl_v[bb_mask==nonlight])
+        print("3 nonlight mean v ", nonlight_mean_v)
+        rl_v[bb_mask==rl["LIGHT"]] = nonlight_mean_v
+        rl_img = cv2.merge([rl_h, rl_s, rl_v])
         # rl_img[bb_mask==rl["LIGHT"],:] = [0,0,0]
         # rl_img[bb_mask==rl["LIGHT"],:] = mean_nonlight_color[:]
-        rl_img[bb_mask==rl["LIGHT"],:] = mean_nonlight_color
-        cv2.imshow("3MEANNONLIGHT", rl_img)
-        cv2.waitKey(0)
+        # rl_img[bb_mask==rl["LIGHT"],:] = mean_nonlight_color
+        # cv2.imshow("3MEANNONLIGHT", rl_img)
+        # cv2.waitKey(0)
 
-      except Exception as e:
+      else:
+      # except Exception as e:
         print("Expected Error? ", e)
+        nonlight = 1 - rl["LIGHT"]
         # if grayscale
         # nonlight_color = rl["CENTER"][1 - rl["LIGHT"]][0]
         nonlight_color = (rl["CENTER"][0] + rl["CENTER"][1]) / 2
-        # rl_img[bb_mask==rl["LIGHT"]] = nonlight_color
-        mean_nonlight_color = np.mean(rl_img[bb_mask==nonlight])
-        rl_img[bb_mask==rl["LIGHT"]] = mean_nonlight_color
-        # rl_img[bb_mask==rl["LIGHT"]] = 0
-        print("0CENTER ", nonlight_color, mean_nonlight_color, nonlight, rl["LIGHT"])
+        rl_img[bb_mask==rl["LIGHT"]] = nonlight_color
+        print("0CENTER ", nonlight_color, nonlight, rl["LIGHT"])
         cv2.imshow("0CENTER", rl_img)
         cv2.waitKey(0)
       # cv2.waitKey()

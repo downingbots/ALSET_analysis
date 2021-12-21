@@ -906,3 +906,24 @@ def relative_bb(bb1, bb2):
 #    print("bb1,bb2,rel sz", (bb1_sz_w, bb1_sz_h), (bb2_sz_w, bb2_sz_h), (rel_sz_w, rel_sz_h))
     return rel_bb
 
+
+def bound_bb(bb):
+    bb1 = copy.deepcopy(bb)
+    for i in range(4):
+      for j in range(2):
+        if bb1[i][j] < 0:
+          bb1[i][j] = 0
+        elif bb1[i][j] > 223:
+          bb1[i][j] = 223
+    return bb1
+
+def pad_bb(bb, padding):
+    maxw, minw, maxh, minh = get_min_max_borders(bb)
+    maxw = min(maxw + padding, 223)
+    maxh = min(maxh + padding, 223)
+    minw = max(minw - padding, 0)
+    minh = max(minh - padding, 0)
+    bb1=[[[minw,minh]],[[minw,maxh]],
+         [[maxw,maxh]],[[maxw,minh]]]
+    return bb1
+
