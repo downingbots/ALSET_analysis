@@ -120,6 +120,9 @@ class CVAnalysisTools():
       # note: PPF also used to ensure that moving
       # tried 0.75, 0.9, 1
       # OPTFLOWTHRESH = 0.8
+# BUG: optflow is too variable. Need a way to make it more predictable
+# or replace it with something else...  For now, look for a successful
+# behavior of PARK_ARM_RETRACTED.
       if thresh is None:
         thresh = self.cfg.OPTFLOWTHRESH
       if dist > thresh:

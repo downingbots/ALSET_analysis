@@ -21,8 +21,9 @@ class AnalyzeArm():
       self.cvu = CVAnalysisTools(self.alset_state)
       self.cfg = Config()
 
-  def analyze(self, frame_num, action, prev_img_path, curr_img_path, done=False, curr_func_name=None):
+  def analyze(self, action, prev_img_path, curr_img_path, done=False, curr_func_name=None):
       save = False 
+      frame_num = self.alset_state.get_frame_num()
       arm_actions = ["UPPER_ARM_UP", "UPPER_ARM_DOWN", "LOWER_ARM_UP", "LOWER_ARM_DOWN"]
       opposite_dir = {"UPPER_ARM_UP":"UPPER_ARM_DOWN", "LOWER_ARM_UP":"LOWER_ARM_DOWN",
                       "UPPER_ARM_DOWN":"UPPER_ARM_UP", "LOWER_ARM_DOWN":"LOWER_ARM_UP"}
@@ -30,7 +31,9 @@ class AnalyzeArm():
       opt_flw = self.cvu.optflow(prev_img_path, curr_img_path, thresh=self.cfg.OPTFLOWTHRESH/11)
       # currently only supported known position is PARK_ARM_RETRACTED where
       # UPPER_ARM_UP and LOWER_ARM_DOWN are to their maximum settings.
+      print(frame_num, "Arm Analyze: func, done: ", curr_func_name, done)
       if curr_func_name == "PARK_ARM_RETRACTED" and done:
+        print("func PARK_ARM_RETRACTED done; set state to ARM_RETRACTED")
         self.arm_state = "ARM_RETRACTED"
         for act in arm_actions:
           self.arm_cnt[act] = 0 
@@ -54,9 +57,9 @@ class AnalyzeArm():
         elif self.arm_state == "UNKNOWN":
           pass
         elif not opt_flw and self.arm_state == "ARM_RETRACTED" and action in ["UPPER_ARM_UP", "LOWER_ARM_DOWN"]:
-          pass
+          self.arm_state = "ARM_RETRACTED_DELTA"
         elif self.arm_state == "ARM_RETRACTED" and action in ["UPPER_ARM_UP", "LOWER_ARM_DOWN"]:
-          pass
+          self.arm_state = "ARM_RETRACTED_DELTA"
         elif not opt_flw and self.arm_state == "ARM_RETRACTED_DELTA":
           if action == "UPPER_ARM_UP":
             self.upper_arm_done = True
@@ -76,12 +79,12 @@ class AnalyzeArm():
             self.lower_arm_done = False
           self.arm_cnt[action] += 1 
           # self.arm_cnt[opposite_dir[action]] -= 1 
-
+        self.alset_state.set_known_robot_state(frame_num, self.arm_state)
       self.prev_frame_num = frame_num
       self.prev_action = action
       print("arm opt_flw, uad, lad:", opt_flw, self.upper_arm_done, self.lower_arm_done)
       blackboard = [self.upper_arm_done, self.lower_arm_done]
-      self.alset_state.record_arm_state(self.arm_state, self.arm_cnt, blackboard)
+      self.alset_state.record_arm_state(self.arm_state, self.arm_cnt, blackboard, frame_num)
       # note: safe_ground_info recorded by self.get_drivable_ground()
       return self.arm_state, self.arm_cnt
 

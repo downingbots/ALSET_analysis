@@ -278,7 +278,8 @@ def border_to_polygon(border, bufzone=0):
       b.append(list(bdr[0]))
     # print("brdr to poly:", b, bufzone)
     poly = Polygon(b)
-    if bufzone > 0:
+    # if bufzone > 0:
+    if True:
       b2 = []
       center = [poly.centroid.x,poly.centroid.y]
       for bpt in b:
@@ -649,11 +650,12 @@ def point_in_border(border, pt, bufzone=10):
     # Create Point objects
     poly = border_to_polygon(border, bufzone)
     Pt = Point(pt)
+    # print("border, bufzone:", border, bufzone)
     if Pt.within(poly):
-      # print("pt within", Pt)
+      # print("within", Pt)
       return True
     else:
-      # print("pt not within", Pt)
+      # print("not within", Pt)
       return False
 
 def line_in_border(border,pt0,pt1, bufzone=10):
@@ -690,32 +692,49 @@ def expand_bb(bb, ratio):
            [[int(round(maxw)), int(round(maxh))]], [[int(round(maxw)), int(round(minh))]]]
     return new_bb
 
+def bb_to_border(bb):
+    maxw, minw, maxh, minh = get_min_max_borders(bb)
+    new_bb=[[[int(round(minw)), int(round(minh))]],[[int(round(minw)), int(round(maxh))]],
+           [[int(round(maxw)), int(round(maxh))]], [[int(round(maxw)), int(round(minh))]]]
+    return new_bb
+
 def center_bb(bb, wctr=None, hctr=None):
     # 224, INFINITE are magic numbers that can be removed by loading config.py,
     # but seems like overkill...
     bbctr = bounding_box_center(bb)
+    bb_maxx, bb_minx, bb_maxy, bb_miny = get_min_max_borders(bb)
     newbb = copy.deepcopy(bb)
     d = [0,0]
     if wctr is not None:
       d[0] = wctr - int(bbctr[0])
+      d[0] = min(d[0], 223-bb_maxx)
+      d[0] = max(d[0], 0-bb_minx)
     elif hctr is not None:
       d[1] = hctr - int(bbctr[1])
-    for i in range(4):
-      for j in range(2):
-        if newbb[i][0][j] + d[j] < 0:
-          d[j] = 0 - newbb[i][0][j]
-        elif newbb[i][0][j] + d[j] > 223:
-          d[j] = 223 - newbb[i][0][j]
-    # print("newbb,d[j]: ", newbb, d[j])
+      d[1] = min(d[1], 223-bb_maxy)
+      d[1] = max(d[1], 0-bb_miny)
+#    for i in range(4):
+#      for j in range(2):
+#        if newbb[i][0][j] + d[j] < 0:
+#          d[j] = 0 - newbb[i][0][j]
+#        elif newbb[i][0][j] + d[j] > 223:
+#          d[j] = 223 - newbb[i][0][j]
     for i in range(4):
       for j in range(2):
         newbb[i][0][j] += d[j]
-    # print("center_bb", wctr, newbb, bb, bbctr)
+        newbb[i][0][j] = int((newbb[i][0][j]))
+    print("newbb,d[j]: ", newbb, d)
+#        if newbb[i][0][j] > 223:
+#          newbb[i][0][j] = 223
+#        if newbb[i][0][j] < 0:
+#          newbb[i][0][j] = 0
+    print("center_bb", wctr, hctr, newbb, bb, bbctr)
     return newbb
 
 # with limit_width = True, pass in full_frame_img
 # with limit_width == False, pass in just the object img, but probably a bug on left width
-def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False):
+def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False, padding_pct=None, left_gripper_bb=None, right_gripper_bb=None):
+
     INFINITE = 1000000000000000000
     gray_img = cv2.cvtColor(obj_img, cv2.COLOR_BGR2GRAY)
     gray_img = cv2.Canny(gray_img, 50, 200, None, 3)
@@ -731,39 +750,153 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False):
       for i, c  in enumerate(imagecontours):
         area = cv2.contourArea(c)
         M = cv2.moments(c)
-        print(i, "area, moment:", area, M, len(c))
+        # print(i, "area, moment:", area, M, len(c))
         print(i, "area:", area, len(c))
 
-    # compute across all the Approx Poly edges withing between_gripper_obj image
-    obj_minx = INFINITE
-    obj_miny = INFINITE
-    obj_maxx = 0
-    obj_maxy = 0
-    for count in imagecontours:
-      # epsilon = 0.01 * cv2.arcLength(count, True)
-      epsilon = 0.01 * cv2.arcLength(count, True)
-      approximations = cv2.approxPolyDP(count, epsilon, True)
-      # e.g. [[[224 224]] [[252 372]] [[420 372]] [[447 224]]]
-      # the name of the detected shapes are written on the image
-      print("Approx Poly edges:", len(approximations))
-      # print("Approx Poly", approximations)
+    filter_rl = False
+    rlcnt = 0
+    if rl is not None:
+      filter_rl = True
+      IMG_HW = 224
+      rlmask = rl["LABEL"].copy()
+      rlmask = rlmask.reshape((IMG_HW,IMG_HW))
+
+    lgbb, rgbb = None, None
+    filter_grippers = False
+    if left_gripper_bb is not None and right_gripper_bb is not None:
+      lgbb = copy.deepcopy(left_gripper_bb)
+      rgbb = copy.deepcopy(right_gripper_bb)
+      if intersect_borders(lgbb, obj_bb) or intersect_borders(rgbb, obj_bb):
+        print("intersection: skip gripper filter", lgbb, rgbb, obj_bb)
+        # lgbb = trim_gripper(lgbb, obj_bb)
+        # rgbb = trim_gripper(rgbb, obj_bb)
+      # try again
+      if lgbb is None or rgbb is None:
+        print("Trim failed: skip gripper filter", lgbb, rgbb, obj_bb)
+      else:
+        filter_grippers = True
+        lg_maxx, lg_minx, lg_maxy, lg_miny = get_min_max_borders(lgbb)
+        rg_maxx, rg_minx, rg_maxy, rg_miny = get_min_max_borders(rgbb)
+        g_maxx = rg_minx - 1
+        g_minx = lg_maxx + 1
+        g_maxy = max(lg_maxy, rg_maxy)
+        g_miny = min(lg_miny, rg_miny)
+        betw_gripper_bb = make_bb(g_maxx, g_minx, g_maxy, g_miny)
+        print("betw_gripper_bb:", betw_gripper_bb)
+ 
+    # compute across all the Approx Poly edge withing between_gripper_obj image
+    if padding_pct is not None:
+      bb = pad_bb(obj_bb, padding_pct=padding_pct)
+    else:
+      bb = obj_bb
+    bb = bb_to_border(copy.deepcopy(bb))
+    skip_pts = []
+    process_pts = []
+    for c, count in enumerate(imagecontours):
+        epsilon = 0.01 * cv2.arcLength(count, True)
+        approximations = cv2.approxPolyDP(count, epsilon, True)
+        print("Approx Poly edges:", len(approximations))
+        # print("Approx Poly", approximations)
+        approx_skip = 0
+        approx_process = 0
+        approx_in_objbb = 0
+        for pt in approximations:
+          # skip corners, note shape xy, pt hw are reversed
+          if pt[0][0] in [0, obj_img.shape[xy2hw(0)]-1] and pt[0][1] in [0, obj_img.shape[xy2hw(1)]-1]:
+            continue
+          if filter_rl:
+            if rlmask[pt[0][0], pt[0][1]]==rl["LIGHT"]:
+              rlcnt += 1
+          if not point_in_border(bb, pt[0], bufzone=-1):
+            # note: bufzone 1 allows points to be on border
+            skip_pts.append([pt[0][0],pt[0][1]])
+            approx_skip += 1
+            continue
+          elif filter_grippers:
+            if point_in_border(lgbb, pt[0], bufzone=-1):
+              skip_pts.append([pt[0][0],pt[0][1]])
+              approx_skip += 1
+              continue
+            elif point_in_border(rgbb, pt[0], bufzone=-1):
+              skip_pts.append([pt[0][0],pt[0][1]])
+              approx_skip += 1
+              continue
+          if point_in_border(bb, pt[0], bufzone=-1):
+            approx_in_objbb += 1
+          # TODO: filter approximations that are outside the expected range
+          # TODO: Have an expected size
+          # TODO: Have an expected range of movement
+          approx_process += 1
+          process_pts.append([pt[0][0],pt[0][1]])
+        print(c,"approx_in_objbb, skipped, processed ", approx_in_objbb, approx_skip, approx_process)
+
+    if rlcnt >= .5 * len(process_pts):
+        # TODO: tune this value over time
+        print("RL: set limit_width", rlcnt, len(process_pts))
+        limit_width = True
+    else:
+        print("RL cnt: don't limit width", rlcnt, len(process_pts))
+    print("skip points:", skip_pts)
+    print("process points:", process_pts)
+    #
+    g_bb = None
+    g_minx, g_miny = INFINITE, INFINITE
+    g_maxx, g_maxy = 0, 0
+    g_cnt, pt_cnt  = 0, 0
+    pad_minx, pad_miny = INFINITE, INFINITE
+    pad_maxx, pad_maxy = 0, 0
+    obj_minx, obj_miny = INFINITE, INFINITE
+    obj_maxx, obj_maxy = 0, 0
+    orig_maxx, orig_minx, orig_maxy, orig_miny = get_min_max_borders(obj_bb)
+    if len(process_pts) != 0:
       area = cv2.contourArea(approximations)
       obj_contours = gray_img.copy()
       cv2.drawContours(obj_contours, count, -1, (0,255,0), 3)
       cv2.imshow("contours", obj_contours)
       # cv2.waitKey()
-      maxx, minx, maxy, miny = get_min_max_borders(obj_bb)
-      for pt in approximations:
-        # skip corners, note shape xy, pt hw are reversed
-        if pt[0][0] in [0, obj_img.shape[xy2hw(0)]-1] and pt[0][1] in [0, obj_img.shape[xy2hw(1)]-1]:
-          continue
-        # print(pt[0], end=" ")
-        if limit_width and minx <= pt[0][0] and obj_minx > pt[0][0]:
-          # if rl is None or not (pt[0] in [rl["LABEL"]==rl["LIGHT"]]):
+      print("bb    :", bb)
+      print("obj_bb:", bb_to_border(obj_bb))
+      maxx, minx, maxy, miny = get_min_max_borders(bb)
+      for pt0,pt1 in process_pts:
+        pt[0][0] = pt0
+        pt[0][1] = pt1
+        if filter_grippers:
+          if point_in_border(betw_gripper_bb, pt[0], bufzone=-1):
+            if g_minx > pt[0][0]:
+              g_minx = pt[0][0]
+            if g_miny > pt[0][1]:
+              g_miny = pt[0][1]
+            if g_maxx < pt[0][0]:
+              g_maxx = pt[0][0]
+            if g_maxy < pt[0][1]:
+              g_maxy = pt[0][1]
+            g_cnt += 1
+
+        # if not point_in_border(bb, pt[0], bufzone=-1):
+        #   continue
+
+        pt_cnt += 1
+        if padding_pct is not None:
+          if pad_minx > pt[0][0]:
+            pad_minx = pt[0][0]
+          if pad_miny > pt[0][1]:
+            pad_miny = pt[0][1]
+          if pad_maxx < pt[0][0]:
+            pad_maxx = pt[0][0]
+          if pad_maxy < pt[0][1]:
+            pad_maxy = pt[0][1]
+
+        if limit_width:
+          # light may be on box and ground. Don't extend bb to cover ground light
           if rl is None or not point_in_light(pt[0], rl):
-            obj_minx = pt[0][0]
+            if obj_minx > pt[0][0]:
+              obj_minx = pt[0][0]
             if obj_miny > pt[0][1]:
               obj_miny = pt[0][1]
+            if obj_maxx < pt[0][0]:
+              obj_maxx = pt[0][0]
+            if obj_maxy < pt[0][1]:
+              obj_maxy = pt[0][1]
           else:
             print("rl: skip pt ", pt[0])
         elif not limit_width:
@@ -771,16 +904,6 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False):
             obj_minx = pt[0][0]
           if obj_miny > pt[0][1]:
             obj_miny = pt[0][1]
-        else:
-          print("contour: skip pt ", pt[0])
-        if limit_width and maxx >= pt[0][0] and obj_maxx < pt[0][0]:
-          # if rl is None or not point_in_border(rl["CENTER"], pt[0], bufzone=0):
-          # print("contour: rl label:", [rl["LABEL"]==rl["LIGHT"]])
-          if rl is None or not point_in_light(pt[0], rl):
-            obj_maxx = pt[0][0]
-            if obj_maxy < pt[0][1]:
-              obj_maxy = pt[0][1]
-        elif not limit_width:
           if obj_maxx < pt[0][0]:
             obj_maxx = pt[0][0]
           if obj_maxy < pt[0][1]:
@@ -788,24 +911,86 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False):
         else:
           print("contour: skip pt ", pt[0])
       # TODO: rl overlap; move size
-      #
-      #
-      #
-      # print("")
-      print("object bounds/sz:", [[obj_minx,obj_miny],[obj_maxx,obj_maxy]], [obj_maxx-obj_minx,obj_maxy-obj_miny],obj_img.shape)
-      if obj_maxx-obj_minx <= 0 or obj_maxy-obj_miny <= 0:
-        continue
+      # if obj_maxx-obj_minx <= 0 or obj_maxy-obj_miny <= 0:
+      #  continue
 
-    if obj_miny != INFINITE:
-      if limit_width:
-        cropped_obj_bb=[[[obj_minx,obj_miny]],[[obj_minx,obj_maxy]],
-                        [[obj_maxx,obj_maxy]], [[obj_maxx,obj_miny]]]
+    print("object bounds/sz:", [[obj_minx,obj_miny],[obj_maxx,obj_maxy]], [obj_maxx-obj_minx,obj_maxy-obj_miny],obj_img.shape)
+    print("Final object bounds/sz:", [[obj_minx,obj_miny],[obj_maxx,obj_maxy]], [obj_maxx-obj_minx,obj_maxy-obj_miny],obj_img.shape)
+    # now recenter
+    if (pad_miny == INFINITE):
+      print("No contour points in pad_bb")
+    else:
+      print(pt_cnt, "pad_bb:", pad_maxx, pad_minx, pad_maxy, pad_miny)
+    if (obj_miny == INFINITE):
+      print("No contour points in obj_bb")
+    else:
+      print(pt_cnt, "obj_bb:", obj_maxx, obj_minx, obj_maxy, obj_miny)
+    if filter_grippers:
+      if (g_miny == INFINITE):
+        print("No contour points in between grippers")
+        print(g_cnt, "g_bb  :", g_maxx, g_minx, g_maxy, g_miny)
       else:
-        cropped_obj_bb=[[[obj_minx+minx,obj_miny+miny]],[[obj_minx+minx,obj_maxy+miny]],
-                        [[obj_maxx+minx,obj_maxy+miny]], [[obj_maxx+minx,obj_miny+miny]]]
+        g_bb = make_bb(g_maxx, g_minx, g_maxy, g_miny)
+        print(g_cnt, "g_bb  :", g_maxx, g_minx, g_maxy, g_miny)
+    if (pad_miny != INFINITE):
+        print("y orig/pad max/min", [orig_maxy, orig_miny], [pad_maxy, pad_miny])
+        # changes the bb height
+        pad_ctry = int((pad_maxy + pad_miny) / 2)
+        pad_ctrx = int((pad_maxx + pad_minx) / 2)
+        orig_w = int((orig_maxx - orig_minx) / 2) # width to pad each size
+        orig_h = int((orig_maxy - orig_miny) / 2) # height to pad each size
+
+        delta_y = int((pad_maxy - pad_miny) / 2)
+        delta_x = int((pad_maxx - pad_minx) / 2)
+        MIN_HEIGHT = orig_maxx - orig_minx
+        if delta_y < MIN_HEIGHT:
+          delta_y = MIN_HEIGHT
+          print("MIN_HEIGHT:", MIN_HEIGHT)
+        if limit_width or (orig_maxx-orig_minx)*.75 <= delta_x:
+          print(".75 size => padding:", (orig_maxy - orig_miny) * .75, (pad_maxy - pad_miny))
+          # following keeps the same size bb but recenters it.
+          cropped_obj_bb = make_bb(pad_maxx, pad_minx, pad_maxy, pad_miny)
+          cropped_obj_ctr = bounding_box_center(cropped_obj_bb)
+          cropped_obj_bb  = center_bb(obj_bb, cropped_obj_ctr[0], cropped_obj_ctr[1])
+          # keep the original width
+          co_maxx, co_minx, co_maxy, co_miny = get_min_max_borders(cropped_obj_bb)
+          delta_pad_maxx = co_maxx
+          delta_pad_minx = co_minx
+        else:
+          # pad each side by half the width of object
+          # should be now bigger than original
+          delta_pad_maxx = min(223, max(pad_maxx, (pad_ctrx + orig_w)))
+          delta_pad_minx = max(0, min(pad_minx, (pad_ctrx - orig_w)))
+        # may need to extend
+        delta_pad_maxy = min(223, max(pad_maxy, (pad_ctry + orig_h)))
+        print("pad_maxy, pad_miny, pad_ctry, orig h, delta_y:", pad_maxy, pad_miny, pad_ctry, orig_h, delta_y)
+        print("pad_maxx, pad_minx, pad_ctrx, orig w, delta_x:", pad_maxx, pad_minx, pad_ctrx, orig_w, delta_x)
+
+        delta_pad_miny = max(0, min(pad_miny, (pad_ctry - orig_h)))
+        print("delta_pad x/y max/min:", delta_pad_maxx, delta_pad_minx,
+                                    delta_pad_maxy, delta_pad_miny)
+        cropped_obj_bb = make_bb(delta_pad_maxx, delta_pad_minx, 
+                                 delta_pad_maxy, delta_pad_miny)
+    elif obj_miny != INFINITE:
+      if limit_width:
+        # since we're not changing the obj_bb shape, limit_width and else is same
+        cropped_obj_bb = make_bb(obj_maxx, obj_minx, obj_maxy, obj_miny)
+        cbbctr = bounding_box_center(cropped_obj_bb)
+        print("lw: obj_bb, cbb, cbbctr", obj_bb, cropped_obj_bb, cbbctr)
+        cropped_obj_bb  = center_bb(obj_bb, cbbctr[0], cbbctr[1])
+      else:
+        cropped_obj_bb = make_bb(obj_maxx, obj_minx, obj_maxy, obj_miny)
     else:
       print("WARNING: cropping of obj_bb failed")
-      cropped_obj_bb = copy.deepcopy(obj_bb)
+      if filter_grippers and g_bb is not None:
+        gctr   = bounding_box_center(g_bb)
+        cropped_obj_bb  = center_bb(obj_bb, gctr[0], gctr[1])
+        print("recentering:", cropped_obj_bb, gctr)
+      else:
+        cropped_obj_bb = copy.deepcopy(obj_bb)
+    co_maxx, co_minx, co_maxy, co_miny = get_min_max_borders(cropped_obj_bb)
+    if co_maxx <= co_minx or co_maxy <= co_miny:
+      cropped_obj_bb = None
     return cropped_obj_bb
       
 
@@ -844,9 +1029,8 @@ def max_bb(bb1, bb2):
     bb1_minw = min(bb1_minw, bb2_minw)
     bb1_maxh = max(bb1_maxh, bb2_maxh)
     bb1_minh = min(bb1_minh, bb2_minh)
-    bb_min=[[[bb1_minw,bb1_minh]],[[bb1_minw,bb1_maxh]],
-            [[bb1_maxw,bb1_maxh]],[[bb1_maxw,bb1_minh]]]
-    return bb_min
+    bb_max = make_bb(bb1_maxw, bb1_minw, bb1_maxh, bb1_minh)
+    return bb_max
 
 def min_bb(bb1, bb2):
     bb1_maxw, bb1_minw, bb1_maxh, bb1_minh = get_min_max_borders(bb1)
@@ -855,8 +1039,7 @@ def min_bb(bb1, bb2):
     bb1_minw = max(bb1_minw, bb2_minw)
     bb1_maxh = min(bb1_maxh, bb2_maxh)
     bb1_minh = max(bb1_minh, bb2_minh)
-    bb_min=[[[bb1_minw,bb1_minh]],[[bb1_minw,bb1_maxh]],
-            [[bb1_maxw,bb1_maxh]],[[bb1_maxw,bb1_minh]]]
+    bb_min = make_bb(bb1_maxw, bb1_minw, bb1_maxh, bb1_minh)
     return bb_min
 
 # E.G.: rel_bb to exclude the robot light (bb2) from an image of a cube (bb1)
@@ -894,16 +1077,7 @@ def relative_bb(bb1, bb2):
       rel_minh += reduce_side
       rel_maxw -= reduce_side
       rel_maxh -= reduce_side
-    rel_bb=[[[rel_minw,rel_minh]],[[rel_minw,rel_maxh]],
-            [[rel_maxw,rel_maxh]],[[rel_maxw,rel_minh]]]
-#    bb1_sz_w = bb1_maxw - bb1_minw
-#    bb1_sz_h = bb1_maxh - bb1_minh
-#    bb2_sz_w = bb2_maxw - bb2_minw
-#    bb2_sz_h = bb2_maxh - bb2_minh
-#    rel_sz_w = rel_maxw - rel_minw
-#    rel_sz_h = rel_maxh - rel_minh
-#    print("rel max min w h", rel_maxw, rel_minw, rel_maxh, rel_minh)
-#    print("bb1,bb2,rel sz", (bb1_sz_w, bb1_sz_h), (bb2_sz_w, bb2_sz_h), (rel_sz_w, rel_sz_h))
+    rel_bb = make_bb(rel_maxx, rel_minx, rel_maxy, rel_miny)
     return rel_bb
 
 
@@ -911,19 +1085,74 @@ def bound_bb(bb):
     bb1 = copy.deepcopy(bb)
     for i in range(4):
       for j in range(2):
-        if bb1[i][j] < 0:
-          bb1[i][j] = 0
-        elif bb1[i][j] > 223:
-          bb1[i][j] = 223
+        if bb1[i][0][j] < 0:
+          bb1[i][0][j] = 0
+        elif bb1[i][0][j] > 223:
+          bb1[i][0][j] = 223
     return bb1
 
-def pad_bb(bb, padding):
+def pad_bb(bb, padding_pct=None, padding_pix=None):
     maxw, minw, maxh, minh = get_min_max_borders(bb)
+    if padding_pct is not None:
+      padding = padding_pct * min(maxw-minw, maxh-minh)
+    elif padding_pix is not None:
+      padding = padding_pix
+    else:
+      print("WARNING: pct or pix pad_bb parameter must be Non-Null")
+      return bb
     maxw = min(maxw + padding, 223)
     maxh = min(maxh + padding, 223)
     minw = max(minw - padding, 0)
     minh = max(minh - padding, 0)
-    bb1=[[[minw,minh]],[[minw,maxh]],
-         [[maxw,maxh]],[[maxw,minh]]]
+    bb1= make_bb(maxw, minw, maxh, minh)
     return bb1
 
+def make_bb(maxw, minw, maxh, minh):
+    bb = [[[minw,minh]],[[minw,maxh]],[[maxw,maxh]],[[maxw,minh]]]
+    return bb
+
+def minus_bb(bb, minusbb):
+    # simple minus function intended for fixing trivial overlaps
+    # at bb borders, such as when gripper bb is touching a cube bb.
+    bb2 = copy.deepcopy(minusbb)
+    if not intersect_borders(bb,bb2):
+      return bb
+    bb1_maxw, bb1_minw, bb1_maxh, bb1_minh = get_min_max_borders(bb)
+    bb2_maxw, bb2_minw, bb2_maxh, bb2_minh = get_min_max_borders(minusbb)
+
+    if bb1_maxw >= bb2_minw:
+      bb1_maxw = bb2_minw-1
+    if bb1_minw <= bb2_maxw:
+      bb1_minw = bb2_maxw+1
+    if bb1_maxh >= bb2_minh:
+      bb1_maxh = bb2_minh-1
+    if bb1_minh <= bb2_maxh:
+      bb1_minh = bb2_maxh+1
+    bb1 = make_bb(bb1_maxw, bb1_minw, bb1_maxh, bb1_minh)
+    if not intersect_borders(bb1,bb2):
+      return bb1
+    else:
+      print("MINUS Failed:", bb, minusbb)
+      return None
+  
+def trim_gripper(gripper_bb, trimbb):
+    # simple minus function intended for fixing trivial overlaps
+    # where a gripper bb is touching a cube bb.
+    bb2 = copy.deepcopy(trimbb)
+    if not intersect_borders(gripper_bb,bb2):
+      return gripper_bb
+    bb1_maxw, bb1_minw, bb1_maxh, bb1_minh = get_min_max_borders(gripper_bb)
+    bb2_maxw, bb2_minw, bb2_maxh, bb2_minh = get_min_max_borders(trimbb)
+
+    trim_pix = 5
+    if bb1_maxw >= bb2_minw and bb1_maxw - trim_pix <= bb2_minw:
+      bb1_maxw = bb2_minw-1
+    if bb1_minw <= bb2_maxw and bb1_minw - trim_pix >= bb2_maxw:
+      bb1_minw = bb2_maxw+1
+    bb1 = make_bb(bb1_maxw, bb1_minw, bb1_maxh, bb1_minh)
+    if not intersect_borders(bb1,bb2):
+      return bb1
+    else:
+      print("TRIM gripper failed:", gripper_bb, trimbb)
+      return bb1
+  

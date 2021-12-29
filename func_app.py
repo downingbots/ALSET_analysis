@@ -4,7 +4,8 @@ import dataset_utils as ds_utils
 # Note: a partial clone of ALSET/functional_app.py to minimalize includes
 # the functions used here to parse a func app should be factored out of functional_app.py
 class FunctionalApp():
-  def __init__(self, app_name, app_type):
+  def __init__(self, app_name, app_type,  alset_state=None):
+      self.alset_state = alset_state
       # print("TableTop: 8 Functional NNs")
       self.NN = []
       self.dsu = ds_utils.DatasetUtils(app_name, app_type)
@@ -29,6 +30,19 @@ class FunctionalApp():
       else:
         print("No such app defined: ", self.app_name)
         exit()
+
+  def func_callback(self, func_name, input_rew_pen):
+      print("AFM: func callback", func_name, input_rew_pen)
+      if func_name.startswith("PARK_ARM"):
+        if input_rew_pen in ["REWARD1", "REWARD2"]:
+          arm_cnt = {}
+          for act in ["UPPER_ARM_UP", "UPPER_ARM_DOWN", "LOWER_ARM_UP", "LOWER_ARM_DOWN"]:
+            arm_cnt[act] = 0
+          self.alset_state.record_arm_state("ARM_RETRACTED", arm_cnt, [True,True])
+          if func_name == "PARK_ARM_RETRACTED":
+            self.alset_state.record_gripper_state("FULLY_OPEN", 0, 0)
+
+
 
   #############
   # Go through the app func flow model.
@@ -58,6 +72,7 @@ class FunctionalApp():
             print("AFM: IF")
             if reward_penalty == it1[1]:
               print("AFM: matching reward")
+              self.func_callback(self.NN[self.ff_nn_num], reward_penalty)
               if type(it1[2])==list:
                 print("AFM: list compare")
                 self.ff_nn_num = it1[2][1]
@@ -97,7 +112,7 @@ class FunctionalApp():
                 break
             else:
                 output_rew_pen = reward_penalty
-                print("AFT: rew_pen ", output_rew_pen)
+                print("AFM: rew_pen ", output_rew_pen)
     if self.ff_nn_num is None:
       print("AFM: ending: ", output_rew_pen)
       return [None, output_rew_pen]
@@ -105,3 +120,4 @@ class FunctionalApp():
     self.curr_func_name = self.NN[self.ff_nn_num]
     return [self.NN[self.ff_nn_num], output_rew_pen]
 
+ 

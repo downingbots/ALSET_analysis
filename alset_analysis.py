@@ -30,7 +30,6 @@ class DSAnalysis():
       ## detailed analysis of box
       # self.face_analysis = AnalyzeFace
       self.MAX_MOVES_REWARD = None
-      self.init_frame_num = 0
       self.alset_state = self.alset_state.load_state(self.dsu.alset_state_filename(app_name))
       if self.alset_state is None:
         print("self.alset_state is None")
@@ -50,6 +49,7 @@ class DSAnalysis():
         self.arm_analysis.load_state()
         self.cvu = CVAnalysisTools(self.alset_state)
         self.cvu.load_state() # note: does load automatically
+        self.alset_state.load_state_completed()
         state_loaded = True
       while True:
         ## predict next move
@@ -66,6 +66,7 @@ class DSAnalysis():
           self.arm_analysis = AnalyzeArm(self.alset_state)
           self.alset_state.init_app_run(app_run_num=self.run_num, app_name=self.app_name, app_mode=self.app_type)
         res = self.parse_app_dataset()
+        self.alset_state.reset_frame_num()
         res2 = self.alset_state.post_run_analysis()
         if res is None or not res2:
           break
@@ -90,7 +91,6 @@ class DSAnalysis():
           line = None
           next_action = None
           next_line = None
-          frame_num = 0
           self.curr_phase = 0
           nn_filehandle = open(func_index, 'r')
           line = None
@@ -99,7 +99,7 @@ class DSAnalysis():
             next_line = nn_filehandle.readline()
             if not next_line:
                 run_complete = True
-                print("PFD: Function Index completed:", frame_num, NN_name, next_action)
+                print("PFD: Function Index completed:", self.get_frame_num, NN_name, next_action)
                 break
             # get action & next_action
             [tm, app, mode, next_nn_name, next_action, img_name, next_state] = self.dsu.get_dataset_info(next_line, mode="FUNC")
@@ -114,24 +114,25 @@ class DSAnalysis():
                 continue
 
               else:
-                if frame_num > self.init_frame_num:
+                if not self.alset_state.restarting():
+                  self.alset_state.increment_frame()
                   self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state)
-                  self.dispatch(frame_num, action, state, next_state, done)
+                  self.dispatch(action, state, next_state, done)
                 else:
-                  self.analyze_map.alset_ratslam_replay(frame_num)
-                print("PFD: dispatch:", frame_num, action, reward, done, next_action)
+                  self.analyze_map.alset_ratslam_replay()
+                print("PFD: dispatch:", action, reward, done, next_action)
               if next_action == "REWARD1":
-                if frame_num > self.init_frame_num:
+                if not self.alset_state.restarting():
+                  self.alset_state.increment_frame()
                   self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state)
-                  self.dispatch(frame_num, action, state, next_state, done)
+                  self.dispatch(action, state, next_state, done)
                 done = True  # end of func is done in this mode
-                print("PFD: completed REWARD phase2", frame_num, next_action, reward, done)
+                print("PFD: completed REWARD phase2", self.get_frame_num(), next_action, reward, done)
               elif next_action in ["PENALTY1", "PENALTY2"]:
-                if frame_num > self.init_frame_num:
-                  self.dispatch(frame_num, action, state, next_state, done)
+                if not self.alset_state.restarting():
+                  self.dispatch(action, state, next_state, done)
                 done = True  # end of func is done in this mode
-                print("PFD: assessed run-ending PENALTY", frame_num, next_action, reward, done)
-              frame_num += 1
+                print("PFD: assessed run-ending PENALTY", next_action, reward, done)
               # add dummy 0 q_val for now. Compute q_val at end of run.
               q_val = 0
             if next_action not in ["REWARD1", "PENALTY1", "PENALTY2"]:
@@ -143,11 +144,11 @@ class DSAnalysis():
   def parse_app_dataset(self, app_mode="APP"):
         print("PAD: >>>>> parse_app_dataset")
         # app_dsu = DatasetUtils(self.app_name, "ANALYZE")
-        frame_num = 0
+        self.alset_state.reset_frame_num()
         reward = []
         # val = self.cfg.get_value(self.cfg.app_registry, self.app_name)
         # func_nn_list = val[1]
-        self.func_app = FunctionalApp(app_name=self.app_name, app_type=self.app_type)
+        self.func_app = FunctionalApp(app_name=self.app_name, app_type=self.app_type, alset_state=self.alset_state)
         done = False
         self.parse_app_ds_details = []
 
@@ -186,10 +187,9 @@ class DSAnalysis():
                     # End of Func Flow. Append reward.
                     # add dummy 0 q_val for now. Compute q_val at end of run.
                     done = True
-                    print("frame", frame_num, self.init_frame_num)
-                    if frame_num > self.init_frame_num:
-                      self.dispatch(frame_num, action, state, next_state, done)
-                    frame_num += 1
+                    # local_frame_num += 1  # now maintained by alset_state
+                    if not self.alset_state.restarting():
+                      self.dispatch(action, state, next_state, done)
               run_complete = True
               print("PAD: Function flow complete", state, action, reward, next_state, done, q_val)
               break
@@ -230,7 +230,8 @@ class DSAnalysis():
             print("next_line:", next_line)
             if not next_line:
                 run_complete = True
-                print("PAD: Function Index completed:", frame_num, NN_name, next_action)
+                print("PAD: Function Index completed:", NN_name, next_action)
+
                 break
             # get action & next_action (nn_name is None)
             [tm, app, mode, next_nn_name, next_action, img_name, next_state] = self.dsu.get_dataset_info(next_line, mode="FUNC")
@@ -246,29 +247,34 @@ class DSAnalysis():
                 line = next_line
                 continue
               else:
-                if frame_num > self.init_frame_num:
+                if not self.alset_state.restarting():
                   print("amnais:", self.app_name, mode, NN_name, action, img_name, state)
+                  self.alset_state.increment_frame()
                   self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
                   # the final compute reward sets done to True (see above)
-                  self.dispatch(frame_num, action, state, next_state, done)
-                  print("PAD: dispatch:", frame_num, action, reward, done)
+                  self.dispatch(action, state, next_state, done)
+                  print("PAD: dispatch:", self.get_frame_num(), action, reward, done)
               if next_action == "REWARD1" and func_flow_reward == "REWARD1":
-                if frame_num > self.init_frame_num:
+                if not self.alset_state.restarting():
                   print("PAD: FUNC_FLOW_REWARD4:", func_flow_reward)
+                  self.alset_state.increment_frame()
                   self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
-                  self.dispatch(frame_num, action, state, next_state, done)
-                  print("PAD: completed REWARD phase", frame_num, next_action, reward, done)
+                  done = True  
+                  self.dispatch(action, state, next_state, done)
+                  print("PAD: completed REWARD phase", self.get_frame_num(), next_action, reward, done)
                 if func_flow_nn_name is None:
                   done = True  
-                print("PAD: granted REWARD", frame_num, next_action, reward, done)
+                print("PAD: granted REWARD", self.get_frame_num(), next_action, reward, done)
               elif next_action in ["PENALTY1", "PENALTY2"]:
-                if frame_num > self.init_frame_num:
+                if not self.alset_state.restarting():
+                  self.alset_state.increment_frame()
                   self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
-                  self.dispatch(frame_num, action, state, next_state, done)
+                  self.dispatch(action, state, next_state, done)
                 if func_flow_nn_name is None:
                   done = True  
-                  print("PAD: assessed run-ending PENALTY", frame_num, next_action, reward, done)
-              frame_num += 1
+                  print("PAD: assessed run-ending PENALTY", self.get_frame_num(), next_action, reward, done)
+              # local_frame_num += 1  # obsolete
+              # frame_num = self.alset_state.frame_num
               # add dummy 0 q_val for now. Compute q_val at end of run.
               q_val = 0
             if next_action not in ["REWARD1", "PENALTY1", "PENALTY2"]:
@@ -279,7 +285,7 @@ class DSAnalysis():
         self.dsu.save_dataset_idx_processed(mode = app_mode, ds_idx=app_index)
         return "PROCESSED_APP_RUN"
 
-  def dispatch(self, frame_num, action, prev_img, curr_img, done=False):
+  def dispatch(self, action, prev_img, curr_img, done=False):
       print("curr_func_name: ", self.func_app.curr_func_name)
       print("CPT: predicted, actual:", self.move_analysis.predict(), action)
       gc.collect()
@@ -295,57 +301,18 @@ class DSAnalysis():
 
       # if action in ["GRIPPER_OPEN", "GRIPPER_CLOSE"]:
       # All frames have a gripper bounding box and need analysis
-      self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+      self.gripper_analysis.analyze(action, prev_img, curr_img, done)
       if action.startswith("UPPER_ARM") or action.startswith("LOWER_ARM"):
-        self.arm_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
+        self.arm_analysis.analyze(action, prev_img, curr_img, done, self.func_app.curr_func_name)
+      else:
+        self.alset_state.copy_prev_arm_state()
       if action in ["FORWARD","REVERSE","LEFT","RIGHT"]:
-        self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
+        self.map_analysis.analyze(action, prev_img, curr_img, done)
       self.alset_state.save_state()
       return done 
 
-#      ####################
-#      if self.func_app.curr_func_name.startswith("PARK_ARM_RETRACTED"):
-#        self.analyze_PARetracted(frame_num, action, prev_img, curr_img, done)
-#        print("curr_func_name: ", self.func_app.curr_func_name)
-#      elif self.func_app.curr_func_name == "QUICK_SEARCH_FOR_CUBE":
-#        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-#        self.analyze_clusters.analyze(frame_num, action, prev_img, curr_img, done)
-#
-#      elif self.func_app.curr_func_name == "GOTO_CUBE":
-##        self.cube_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-#        self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-#        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-#        self.analyze_clusters.analyze(frame_num, action, prev_img, curr_img, done)
-#      elif self.func_app.curr_func_name == "PICK_UP_CUBE":
-##        self.cube_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-##        self.pickup_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)
-#         result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-#         self.arm_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-#         pass
-#      elif self.func_app.curr_func_name == "PARK_ARM_RETRACTED_WITH_CUBE":
-#        result = self.gripper_analysis.check_cube_in_gripper(frame_num, action, prev_img, curr_img, done)
-#        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-#      elif self.func_app.curr_func_name == "QUICK_SEARCH_FOR_BOX_WITH_CUBE":
-#        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-#        self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-##        self.analyze_clusters.analyze(frame_num, action, prev_img, curr_img, done)
-#      elif self.func_app.curr_func_name == "GOTO_BOX_WITH_CUBE":
-##        self.box_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)
-#        self.map_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-#        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-#      elif self.func_app.curr_func_name == "DROP_CUBE_IN_BOX":
-#        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-##        self.box_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.cube_analysis, self.gripper_analysis)
-#        print("PAR1")
-#        result = self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
-#      self.alset_state.save_state()
-#      return done 
-#
-#  def analyze_PARetracted(self, frame_num, action, prev_img, curr_img, done):
-#      if action in ["GRIPPER_OPEN", "GRIPPER_CLOSE"]:
-#        self.gripper_analysis.analyze(frame_num, action, prev_img, curr_img, done)
-#      elif action.startswith("UPPER_ARM") or action.startswith("LOWER_ARM"):
-#        self.arm_analysis.analyze(frame_num, action, prev_img, curr_img, done, self.func_app.curr_func_name)
+  def get_frame_num(self):
+      return self.alset_state.get_frame_num()
 
   def load_state(self):
       self.app_name  = self.alset_state.last_app_state("APP_NAME")
@@ -353,7 +320,6 @@ class DSAnalysis():
       self.run_id    = self.alset_state.last_app_state("APP_RUN_ID")
       self.run_num   = self.alset_state.last_app_state("APP_RUN_NUM")
       self.start_with_func_index = self.alset_state.last_app_state("FUNC_INDEX")
-      self.init_frame_num = self.alset_state.last_frame_state("FRAME_NUM")
-      print("state:", self.app_name, self.app_type, self.run_id, self.run_num, self.start_with_func_index, self.init_frame_num)
+      print("state:", self.app_name, self.app_type, self.run_id, self.run_num, self.start_with_func_index, self.alset_state.restart_frame_num)
 
 dsa = DSAnalysis()

@@ -29,8 +29,13 @@ class AlsetState():
       self.run_num   = -1
       self.func_num  = -1
       self.frame_num = -1
+      self.restart_frame_num = self.last_frame_state("FRAME_NUM")
+      print("RESTART FRAME:", self.restart_frame_num)
+      if self.restart_frame_num is None:
+        self.restart_frame_num = -1
       self.arm_state = None
       self.gripper_state = None
+      self.robot_state = {}
 
       # Global state contains cross-run analysis
       # Details are stored on a per-run basis
@@ -93,7 +98,7 @@ class AlsetState():
       self.state[run_num]["ACTIONS"]         = {}
       self.state[run_num]["ACTIVE_MAP"]      = None
       self.state[run_num]["FINAL_MAP"]       = None
-      self.state[run_num]["LOCATION_ORIGIN"] = None
+      self.state[run_num]["MAP_ORIGIN"]      = None
       self.state[run_num]["MEAN_LIGHTING"]   = None
       self.state[run_num]["LOCATION_HISTORY"] = []
       self.state[run_num]["PICKUP"]          = {}
@@ -169,10 +174,11 @@ class AlsetState():
       self.run_id   = None
 
   def record_frame_info(self, app, mode, nn_name, action, img_nm, full_img_path):
-      self.frame_num += 1
+      if self.frame_num != len(self.frame_state):
+        print(self.frame_num, len(self.frame_state))
+        i = 1/0
       # Prev Func State
       # Current Func State
-      # print("record_frame_info: ",len(self.func_state))
       # print(self.func_state[-1]["APP_NAME"], self.func_state[-1]["APP_MODE"])
       # print("record_frame_info: ",len(self.func_state),self.func_state[-1]["APP_NAME"], self.func_state[-1]["APP_MODE"])
       if (len(self.func_state["FUNC_NAME"]) == 0 or
@@ -186,6 +192,7 @@ class AlsetState():
 
       # Action-related state
       self.frame_state.append({})
+      print(self.frame_num, "record_frame_info: ",len(self.func_state), action)
       self.frame_state[-1]["ACTION"]         = action
       self.frame_state[-1]["FRAME_PATH"]     = full_img_path
       self.frame_state[-1]["FRAME_NUM"]      = self.frame_num
@@ -199,7 +206,6 @@ class AlsetState():
       self.frame_state[-1]["LOCATION"]       = {}
       self.frame_state[-1]["ARM_STATE"]      = {}   # "O"/ "C", open/close count
       self.frame_state[-1]["GRIPPER_STATE"]  = {}
-      self.frame_state[-1]["KNOWN_STATE"]    = None # "ARM_RETRACTED", "DELTA"
       self.frame_state[-1]["PREDICTED_MOVE"] = None
       self.frame_state[-1]["BOUNDING_BOX_LABELS"] = {}
       self.frame_state[-1]["BOUNDING_BOX"]        = []
@@ -279,11 +285,61 @@ class AlsetState():
       except:
         return None
 
-  def record_arm_state(self, state, arm_cnt, blackboard):
-      self.arm_state["ARM_POSITION"] = state
-      self.arm_state["ARM_POSITION_COUNT"] = arm_cnt.copy()
+  def record_arm_state(self, state, arm_cnt, blackboard, frame_num=None):
+      if frame_num is None:
+        frame_num = self.frame_num
+      # "ARM_POSITION" => "UNKNOWN", "ARM_RETRACTED", "ARM_RETRACTED_DELTA"
+      arm_state     = self.frame_state[frame_num]["ARM_STATE"]
+      arm_state["ARM_POSITION"] = state
+      # "ARM_POSITION_COUNT" => ["<armaction>"] = cnt
+      arm_state["ARM_POSITION_COUNT"] = arm_cnt.copy()
+      # blackboard "ARM" => upper_arm_done, lower_arm_done]
       self.blackboard["ARM"] = blackboard.copy()
-      print("record_arm_state:", self.arm_state["ARM_POSITION"], self.arm_state["ARM_POSITION_COUNT"])
+      print("record_arm_state:", arm_state["ARM_POSITION"], arm_state["ARM_POSITION_COUNT"])
+
+  def copy_prev_arm_state(self, frame_num=None):
+      if frame_num is None:
+        frame_num = self.frame_num
+      print("frame_num, len frame_state:", frame_num, len(self.frame_state))
+      print("frame_state:", self.frame_state[frame_num])
+      arm_state      = self.frame_state[frame_num]["ARM_STATE"]
+      if len(arm_state) != 0:
+        print("WARNING: copy_prev_arm_state called when state already exists")
+        print("frame_num, arm_pos, armcnt:", frame_num, arm_state["ARM_POSITION"], arm_state["ARM_POSITION_COUNT"])
+        return
+      if frame_num is None or frame_num <= 0:
+        print("copy: UNKNOWN arm state due to frame_num", frame_num)
+        arm_state["ARM_POSITION"] = "UNKNOWN"
+        arm_state["ARM_POSITION_COUNT"] = None
+        self.blackboard["ARM"] = None
+        return
+      prev_arm_state = self.frame_state[frame_num-1]["ARM_STATE"]
+      arm_state["ARM_POSITION"] = prev_arm_state["ARM_POSITION"]
+      arm_state["ARM_POSITION_COUNT"] = prev_arm_state["ARM_POSITION_COUNT"]
+      # blackboard is for active transient state at the Run level, so no need 
+      # to copy.
+      print("copy_prev_arm_state:", arm_state["ARM_POSITION"], arm_state["ARM_POSITION_COUNT"], self.blackboard["ARM"])
+
+  # This is called by alset_analysis during restart.
+  # Frame_num is maintained by alset_state but restart needs to replay the
+  # parsing of the history files to find the right place.
+  def get_frame_num(self):
+      return self.frame_num
+
+  def increment_frame(self):
+      self.frame_num += 1
+      print("increment_frame", self.frame_num)
+
+  def reset_frame_num(self):
+      self.frame_num = -1
+
+  def restarting(self):
+      if self.frame_num >= self.restart_frame_num:
+        # last frame is run again in case it was only partially completed
+        print("Not restarting: ", self.frame_num, self.restart_frame_num)
+        return False
+      print("Restarting: ", self.frame_num, self.restart_frame_num)
+      return True
 
   def record_drivable_ground(self, bb, img):
       self.record_bounding_box(["DRIVABLE_GROUND"], bb)
@@ -365,7 +421,8 @@ class AlsetState():
         self.frame_state[-1]["MOVE_ROTATION"] = mv_rot
         self.frame_state[-1]["MOVE_STRAIGHT"] = mv_pos
       else:
-        print("not in mappable position; known state, action", self.frame_state[-1]["KNOWN_STATE"], action)
+        print("not in mappable position; arm state, action", self.frame_state[-1]["ARM_STATE"], action)
+        exit()
 
   def post_run_bounding_box_analysis(self):
       try:
@@ -458,7 +515,7 @@ class AlsetState():
         pass
       # apply new filter to old cube img
       # obj_no_rl_img = self.filter_rl_from_bb_img(obj_bb, obj_img, rl)
-      obj_mean_rl_img = self.filter_rl_from_bb_img(obj_bb, obj_img, obj_rl)
+      obj_mean_rl_img, filter_rl = self.filter_rl_from_bb_img(obj_bb, obj_img, obj_rl)
       # cv2.imshow("1BB Robot Light filter", obj_mean_rl_img)
       min_mse = self.cfg.INFINITE
       best_obj_bb  = None
@@ -479,14 +536,8 @@ class AlsetState():
             # The Robot Light and the cube will overlap during the pickup/grab phase.
             # To avoid training on the Robot Light, the mse of the cube BB should skip 
             # the robot light BB.
-            # rlimg = self.get_robot_light_img(full_img, new_rl)
-            # cv2.imshow("rl", rlimg)
-            # rel_mask = relative_mask(new_obj_bb, new_rl)
-            # print("3exc dbg:", exclude_bb)
-            # new_obj_img = get_bb_img(full_img, new_obj_bb)
-            # new_obj_img = get_bb_img(rlimg, new_obj_bb)
             new_obj_img = get_bb_img(full_img, new_obj_bb)
-            new_obj_mean_rl_img = self.filter_rl_from_bb_img(new_obj_bb, new_obj_img, new_rl)
+            new_obj_mean_rl_img, filter_rl = self.filter_rl_from_bb_img(new_obj_bb, new_obj_img, new_rl)
             # apply new filter to new cube img
             # new_obj_no_rl_img = self.filter_rl_from_bb_img(new_obj_bb, new_obj_img, rl)
             # if self.target is not None:
@@ -529,6 +580,16 @@ class AlsetState():
             b1_bb,b1_img,b1_mse = self.binary_search_for_obj(val[i-1],val[i+1],
                      obj_bb, obj_rl, obj_img, full_rl, full_img, 
                      search_direction, val_mse[i-1], val_mse[i], val_mse[i+1])
+          # too big of a gap. Drill down anyway.
+          # elif i >= 1 and val[i-1] - val[i] > obj_img.shape[w_h] / 2 and val[i-1] - val[i] >= 5:
+          elif i >= 1 and abs(val[i-1] - val[i]) >= 5:
+            print(i,"REC GAP:",val[i-1],val[i],val_mse[i-1],val_mse[i])
+            b1_bb,b1_img,b1_mse = self.binary_search_for_obj(val[i-1],val[i],
+                     obj_bb, obj_rl, obj_img, full_rl, full_img, 
+                     search_direction, val_mse[i-1], None, val_mse[i])
+          else:
+            print(i,"NO REC:",val[i-1],val[i],val_mse[i-1],val_mse[i], obj_img.shape[w_h])
+
           if b1_mse is not None and min_mse >  b1_mse:
             if lv_mse is None: # only top level of recursion
               print(i, "MSE MIN_B1_BB:", min_mse, b1_mse)
@@ -541,25 +602,11 @@ class AlsetState():
                 print("MSE B1_BB:", min_mse, best_obj_bb)
             elif lv_mse is None: # only top level of recursion
               print("MSE B1_BB:", min_mse)
-      if lv_mse is None:
-        contour_bb = get_contour_bb(full_img, best_obj_bb, full_rl, limit_width=True)
-        if contour_bb is not None:
-          print("contour_bb:", contour_bb)
-          print("best_obj_bb:", best_obj_bb, min_mse)
-          new_obj_bb = max_bb(contour_bb, best_obj_bb)
-          try:
-            contour_img = get_bb_img(full_img, contour_bb)
-            cv2.imshow("contour img", contour_img)
-          except:
-            pass
-          # new_obj_img = get_bb_img(full_img, new_obj_bb)
-          cv2.imshow("best img", best_obj_img)
-          cv2.imshow("full img", full_img)
-          cv2.waitKey(0)
-          # best_obj_bb  = new_obj_bb
-          # best_obj_img = new_obj_img
-
-          # get the robot light bb.
+          # cv2.imshow("best img", best_obj_img)
+          # cv2.imshow("full img", full_img)
+          # cv2.waitKey(0)
+      if lv_mse is None: # only top level of recursion
+        print("MSE FINAL BB:", best_obj_bb, min_mse)
       return best_obj_bb, best_obj_img, min_mse
 
   # horiz, vert, rot
@@ -621,6 +668,13 @@ class AlsetState():
         new_obj_img = best_obj_img
         new_obj_bb  = best_obj_bb
         cv2.imshow("fobg: revised obj img", new_obj_img)
+        ##################
+        # contour analysis
+        ##################
+        new_obj_contour_bb = get_contour_bb(curr_img, new_obj_bb, limit_width=True, left_gripper_bb=lgbb, right_gripper_bb=rgbb)
+        print("new_obj_contour_img", new_obj_contour_bb)
+        new_obj_contour_img = get_bb_img(curr_img, new_obj_contour_bb)
+        cv2.imshow("new_obj_contour_bb", new_obj_contour_img)
         cv2.waitKey(0)
         # Not sure that contours are needed in state. If so, return in get_contour_bb
         # label = obj_name + "_CONTOURS"
@@ -640,46 +694,6 @@ class AlsetState():
         continue  # try the next frame
       return  best_obj_bb, best_obj_img
 
-
-#        new_obj_bb = expand_bb(best_obj_bb, 1.5) # add some buffer; crop later
-#        # new_obj_bb = expand_bb(best_obj_bb, 2.0) # add some buffer; crop later
-#        print("best_obj_bb1: ", new_obj_bb)
-#        new_obj_bb = min_bb(new_obj_bb, betw_gripper_bb)
-#        print("best_obj_bb2: ", new_obj_bb)
-#        # rough attempt at obj img
-#        new_obj_img = get_bb_img(curr_img, new_obj_bb)
-#        # refine obj img
-#        contour_bb = get_contour_bb(new_obj_img, new_obj_bb)
-        #################
-        # with only gripper movement. obj width should be at least PickUp size
-        # but bounded by gripper.
-#         obj_maxw, obj_minw, obj_maxh, obj_minh = get_min_max_borders(contour_bb)
-#        if expected_obj_width is not None and obj_maxw - obj_minw < expected_obj_width:
-#          # add difference to both sides
-#          dif = int((expected_obj_width - obj_maxw + obj_minw)/2)
-#          obj_maxw += dif
-#          obj_minw -= dif
-#          nc_maxw, nc_minw, nc_maxh, nc_minh = get_min_max_borders(best_obj_bb)
-#          if nc_maxw < obj_maxw:
-#            dif = int(obj_maxw - nc_maxw)
-#            obj_maxw = nc_maxw
-#            obj_minw -= dif
-#          if nc_minw > obj_minw:
-#            dif = int(nc_minw - obj_minw)
-#            obj_minw = nc_minw
-#            obj_maxw += dif
-#          new_obj_bb = [[[obj_minw, obj_minh]],[[obj_minw, obj_maxh]], 
-#                        [[obj_maxw, obj_maxh]], [[obj_maxw, obj_minh]]]
-#        if expected_obj_height is not None and obj_maxh - obj_minh < expected_obj_height:
-#          # add difference to both sides; avoid rounding changing img size
-#          dif = int((expected_obj_height - obj_maxh + obj_minh)/2)
-#          obj_maxh += dif
-#          obj_minh -= dif
-#          new_obj_bb = [[[obj_minw, obj_minh]],[[obj_minw, obj_maxh]], 
-#                        [[obj_maxw, obj_maxh]], [[obj_maxw, obj_minh]]]
-#        print("best_obj_bb3: ", new_obj_bb)
-#        new_obj_img = get_bb_img(curr_img, new_obj_bb)
-
   # move to analyze_move.py?
   # This following is more analyzis than recording/loading of info 
   def record_pickup_info(self):
@@ -688,8 +702,10 @@ class AlsetState():
       print("func_state", len(self.func_state))
       print("bb", len(self.bb))
       print("lbp", len(self.lbp_state))
-      print("gripper_state", len(self.gripper_state))
-      print("arm_state", len(self.arm_state))
+      if self.gripper_state is not None:
+        print("gripper_state", len(self.gripper_state))
+      if self.arm_state is not None:
+        print("arm_state", len(self.arm_state))
 
       ########################################################################
       # (self, arm_state, gripper_state, image, robot_location, cube_location)
@@ -715,10 +731,6 @@ class AlsetState():
         except:
           self.global_state["EVENT_DETAILS"]["PICK_UP_CUBE"] = [{}]
           puc = self.global_state["EVENT_DETAILS"]["PICK_UP_CUBE"][0]
-        # puc["ORIGIN"]      = fr_state["ORIGIN"].copy()
-        # puc["LOCATION"]    = fr_state["LOCATION"].copy()
-        # puc["ORIENTATION"] = fr_state["ORIENTATION"]
-        # print("PUC:", puc)
         print("start/end func frame:", start_pickup, end_pickup)
         for fr_num in range(start_pickup, end_pickup):
           rl = None
@@ -727,7 +739,7 @@ class AlsetState():
           print("action:", action, fr_num)
           if action in ["FORWARD","REVERSE","LEFT","RIGHT"]:
             # reset location
-            puc["ROBOT_ORIGIN"]      = fr_state["ORIGIN"].copy()
+            puc["ROBOT_ORIGIN"]      = fr_state["MAP_ORIGIN"].copy()
             puc["ROBOT_LOCATION"]    = fr_state["LOCATION"].copy()
             puc["ROBOT_ORIENTATION"] = fr_state["ORIENTATION"]
             start_cube_grab_fr_num = None
@@ -774,14 +786,6 @@ class AlsetState():
               puc["CUBE_SIZE"] = cube_size
             else:
               cube_size = puc["CUBE_SIZE"]
-            # max_left_gripper_bounding_box = [[[0, int(y*.4)]], [[0, y-1]],
-            #                 [[ int(x/2), y-1 ]], [[ int(x/2), int(y*.4)]]]
-            # max_right_gripper_bounding_box =[[[int(x/2),int(y*.4)]],[[x-1,int(y*.4)]],
-            #                               [[x-1, y-1]], [[int(x/2), y-1]]]
-            # [[[49, 48]], [[174, 48]], [[49, 285]], [[174, 285]]]
-            # 
-            print("lgbb:",lgbb)
-            print("rgbb:",rgbb)
             cube_size2 = puc["CUBE_SIZE"]
 
             multiplier = .5
@@ -818,6 +822,7 @@ class AlsetState():
 
             cube_bb        = [[cube_bot_left],[cube_bot_right],
                               [cube_top_left],[cube_top_right]]
+            cube_bb = bound_bb(cube_bb)
 
             # make an immutable copy. This bb is further processed to translate
             # cube space into full_space.
@@ -842,7 +847,7 @@ class AlsetState():
             # cv2.waitKey(0)
 
             # Only run self.process_object_in_robot_light for actual GRAB_CUBE_POSITION?
-            obj_contours = self.process_object_in_robot_light("CUBE", curr_img_path, cube_bb, puc, fr_num)
+            obj_contours = self.process_final_grab("CUBE", curr_img_path, cube_bb, puc, fr_num)
 
             # opt_flw = self.cvu.optflow(prev_img_path, curr_img_path, thresh = 0.05)
             opt_flw = self.cvu.optflow(prev_img_path, curr_img_path, thresh = self.cfg.OPTFLOWTHRESH/10)
@@ -856,13 +861,13 @@ class AlsetState():
         # Found Frame Where Gripper Has Grabbed Cube. 
         # Do in-depth analysis, gather refined stats about cube and state.
         ########################################################################
-        if puc["GRAB_CUBE_POSITION"] != ["GRIPPER_WITH_CUBE"]:
+        if "GRAB_CUBE_POSITION" in puc.keys() and puc["GRAB_CUBE_POSITION"] != ["GRIPPER_WITH_CUBE"]:
           print("forcing GRAB_CUBE_POSITION to be GRIPPER_WITH_CUBE. Was:", puc["GRAB_CUBE_POSITION"])
           puc["GRAB_CUBE_POSITION"] = ["GRIPPER_WITH_CUBE"]
         # we've now forward scanned the potential actions that resulted in the cube being
         # grabbed by the gripper.  Store the results for this and other 1-time events.
         print("PUC2:", puc)
-        if puc["GRAB_CUBE_POSITION"] == ["GRIPPER_WITH_CUBE"]:
+        if "GRAB_CUBE_POSITION" in puc.keys() and puc["GRAB_CUBE_POSITION"] == ["GRIPPER_WITH_CUBE"]:
           puc["ARM_POSITION"] = fr_state["ARM_STATE"]["ARM_POSITION"]
           puc["ARM_POSITION_COUNT"] = fr_state["ARM_STATE"]["ARM_POSITION_COUNT"].copy()
           # finalize start/end cube grab frames
@@ -900,12 +905,6 @@ class AlsetState():
             # print("cube bb, square:", cube_bb, square)
             cube_rlbb = self.get_bb("CUBE_IN_ROBOT_LIGHT",end_cube_grab_fr_num)
             cube_bb   = self.get_bb("CUBE", end_cube_grab_fr_num)
-#            if check_gripper_bounding_box(best_cube_bb, rl):
-#              print("GRIPPER_W_CUBE: cube and robot light overlap", best_cube_bb)
-#            if check_gripper_bounding_box(best_cube_bb, cube_rl):
-#              print("GRIPPER_W_CUBE_IN_LIGHT: cube and robot light overlap", best_cube_bb, cube_rl)
-#            else:
-#              print("WARNING: GRIPPER_W_CUBE: no cube and robot light overlap", best_cube_bb, rlbb, cube_rl)
           else:
             print("WARNING: GRIPPER_W_CUBE: no big change in lighting")
 
@@ -914,7 +913,6 @@ class AlsetState():
           cube_img = self.get_bounding_box_image(curr_img_path, cube_bb)
           self.record_bounding_box(["GRIPPER_WITH_CUBE"], gripper_w_cube_bb, fr_num)
           # self.record_bounding_box(["GRIPPER_WITH_CUBE","CUBE"], gripper_w_cube_bb, fr_num)
-          # self.record_bounding_box(["CUBE"], cube_bb, fr_num)
           gripper_w_cube_img = self.get_bounding_box_image(curr_img_path, gripper_w_cube_bb)
           # ARD: cube_img is more like left gripper...
           # cv2.imshow("cube bb2", cube_img)
@@ -935,7 +933,8 @@ class AlsetState():
         # puc_cube_contours  = puc["CUBE_CONTOURS"]
         puc_cube_width  = puc["CUBE_WIDTH"]
         puc_cube_height  = puc["CUBE_HEIGHT"]
-        cv2.destroyAllWindows()
+        # cv2.destroyAllWindows()
+        mappable_cnt = 0
 
         ########################################################################
         # For the time where cube is known to be between the grippers
@@ -969,7 +968,8 @@ class AlsetState():
           next_img,next_mean_diff,next_rl=self.cvu.adjust_light(next_img_path)
           next_cube_bb = self.get_bb("CUBE", frame_num=fr_num+1)
           next_cube_img = get_bb_img(next_img, next_cube_bb)
-          if fr_num == 173:
+          if fr_num in [121]:
+            print("Frame num:", fr_num)
             cv2.destroyAllWindows()
             # self.target = True
             # cv2.imshow("CURR IMG", curr_img)
@@ -1029,17 +1029,82 @@ class AlsetState():
           next_img_path = self.frame_state[fr_num+1]["FRAME_PATH"]
           mv_dif_x =  None
           mv_dif_y =  None
-          print("action:", self.frame_state[fr_num]["ACTION"], fr_num)
+          print("action:", self.frame_state[fr_num]["ACTION"], fr_num, self.is_mappable_position(self.frame_state[fr_num]["ACTION"], fr_num))
           if self.is_mappable_position(self.frame_state[fr_num]["ACTION"], fr_num):
-            mv_rot = self.frame_state[-1]["MOVE_ROTATION"] 
-            mv_pos = self.frame_state[-1]["MOVE_STRAIGHT"] 
+            # Reenable after hack is gone. For now, move down a little
+            # if mappable_cnt == 0:
+            #   cv2.destroyAllWindows()
+            #   mappable_cnt = 1
+            mv_rot = self.frame_state[fr_num]["MOVE_ROTATION"] 
+            mv_pos = self.frame_state[fr_num]["MOVE_STRAIGHT"] 
+            print("mv_rot/pos:", mv_rot, mv_pos)
+            if mv_rot is None and mv_pos is None:
+              print("frame_state:", self.frame_state[fr_num])
+            elif mappable_cnt == 0:
+              cv2.destroyAllWindows()
+              mappable_cnt = 1
+
             # convert movement from birds_eye_view perspective back to camera perspective
-            if mv_rot is not None:
-              mv_dif_x =  mv_pos / (self.BIRDS_EYE_RATIO_H+1)
-              mv_dif_y =  0
+            if mv_pos is not None:
+              # following prob doesn't work if bb height is too large
+              mv_dif_x =  0
+              mv_dif_y =  mv_pos / (self.cfg.BIRDS_EYE_RATIO_H+1)
+              print("MV_POS: ", mv_dif_x, mv_pos, (self.cfg.BIRDS_EYE_RATIO_H+1))
+              w_h = 1
+              next_cube_ctr  = bounding_box_center(next_cube_bb)
+              # search_window = abs(mv_dif_y) / 2
+              # low_val = next_cube_ctr[w_h] + mv_dif_y - search_window - int(next_cube_img.shape[w_h]*3/4)
+
+              low_val = next_cube_ctr[w_h] + mv_pos
+              print("val:", next_cube_ctr[w_h], mv_dif_y, int(next_cube_img.shape[w_h]*3/4))
+              if low_val < int(next_cube_img.shape[w_h]/2):
+                low_val = int(next_cube_img.shape[w_h]/2)
+              # high_val = next_cube_ctr[w_h] + mv_dif_y + search_window + int(next_cube_img.shape[w_h]*3/4)
+              high_val = next_cube_ctr[w_h] + mv_pos/2
+              if high_val > 223 - int(next_cube_img.shape[w_h]/2):
+                high_val = 223 - int(next_cube_img.shape[w_h]/2)
+              high_val = int(high_val)
+              low_val = int(low_val)
+              # use the best_obj_bb's postition, but the next_cube_img for img comparison
+              best_obj_bb, best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, next_cube_bb, next_rl, next_cube_img, curr_rl, curr_img, "VERT")
+              new_obj_img = best_obj_img
+              new_obj_bb  = best_obj_bb
+              print("low, high val:", low_val, high_val)
+              cv2.imshow("curr img", curr_img)
+              cv2.imshow("0cube: obj img", next_cube_img)
+              cv2.imshow("1mv mse: obj img", new_obj_img)
+
+              step_by = next_cube_img.shape[w_h]
+              next_maxw, next_minw, next_maxh, next_minh = get_min_max_borders(next_cube_bb)
+#              for c_min_h in range(low_val, high_val, step_by):
+#              # for c_min_h in range(0, 223, step_by):
+#                next_maxw, next_minw, next_maxh, next_minh = get_min_max_borders(next_cube_bb)
+#                c_max_h = c_min_h + step_by
+#                c_bb = make_bb(next_maxw, next_minw, c_max_h, c_min_h)
+#                print("c_bb", c_bb)
+#                c_img = get_bb_img(curr_img, c_bb)
+#                cv2.imshow(str(c_min_h), c_img)
+#                cv2.waitKey(0)
+       
+                
+              ##################
+              # contour analysis
+              ##################
+              new_obj_contour_bb = get_contour_bb(curr_img, new_obj_bb, limit_width=False, left_gripper_bb=None, right_gripper_bb=None)
+              print("new_obj_contour_bb", new_obj_contour_bb)
+              new_obj_contour_img = get_bb_img(curr_img, new_obj_contour_bb)
+              cv2.imshow("2mv mse ctr:", new_obj_contour_img)
+              cv2.waitKey(0)
+
+              new_obj_contour_ctr = bounding_box_center(new_obj_contour_bb)
+              next_cube_ctr  = bounding_box_center(next_cube_bb)
+              mv_dif_x =  next_cube_ctr[0] - new_obj_contour_ctr[0]
+              mv_dif_y =  next_cube_ctr[1] - new_obj_contour_ctr[1]
+              print("final mv_dif_x, mv_dif_y:", mv_dif_x, mv_dif_y)
+  
             elif mv_rot is not None:
               curr_cube_ctr = bounding_box_center(curr_cube_bb)
-              robot_pos = [(-self.MAP_ROBOT_H_POSE / (self.BIRDS_EYE_RATIO_H+1)), int(next_img.shape[0]*multiplier) ]
+              robot_pos = [(-self.MAP_ROBOT_H_POSE / (self.cfg.BIRDS_EYE_RATIO_W)), int(next_img.shape[0]*multiplier) ]
               next_angle = rad_arctan2(curr_cube_ctr[0]-robot_pos[0], curr_cube_ctr[1]-robot_pos[1])
               curr_angle = next_angle + mv_rot
               dist = np.sqrt((curr_cube_ctr[0] - robot_pos[0])**2 + (curr_cube_ctr[1] - robot_pos[1])**2)
@@ -1047,6 +1112,10 @@ class AlsetState():
               mv_dif_x = round(dist * math.cos(curr_angle))
               mv_dif_y = round(dist * math.sin(curr_angle))
               print("mv_dif: ", mv_dif_x, mv_dif_y)
+              cv2.imshow("curr img", curr_img)
+              cv2.imshow("0cube: obj img", next_cube_img)
+              cv2.imshow("1mv dif: obj img", new_obj_img)
+              cv2.waitKey(0)
 
           #####################################################################
           # MSE-based analysis
@@ -1059,17 +1128,19 @@ class AlsetState():
               or action.startswith("GRIPPER")):
             # only up/down; next stands for "from frame_num + 1"
             next_maxw, next_minw, next_maxh, next_minh = get_min_max_borders(next_cube_bb)
-            print("binary_search_for_obj")
             if action.startswith("UPPER_ARM") or action.startswith("LOWER_ARM"):
+              print("binary_search_for_obj: vert")
               w_h = 1  # height
-              low_val  = next_minh - int(next_cube_img.shape[w_h]*3)
+              v_multiplier = 3
+              low_val  = next_minh - int(next_cube_img.shape[w_h]*v_multiplier)
               if low_val < int(next_cube_img.shape[w_h]/2):
                 low_val = int(next_cube_img.shape[w_h]/2)
-              high_val = next_maxh + int(next_cube_img.shape[w_h]*3)
+              high_val = next_maxh + int(next_cube_img.shape[w_h]/2)
               if high_val > 223 - int(next_cube_img.shape[w_h]/2):
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
               search_dir = "VERT"
             elif action.startswith("GRIPPER"):
+              print("binary_search_for_obj: horiz")
               w_h = 0  # width
               low_val  = next_minw - int(next_cube_img.shape[w_h]*3)
               if low_val < int(next_cube_img.shape[w_h]/2):
@@ -1078,11 +1149,13 @@ class AlsetState():
               if high_val > 223 - int(next_cube_img.shape[w_h]/2):
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
               search_dir = "HORIZ"
-            mse_best_obj_bb, mse_best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, next_cube_bb, next_rl, next_cube_img, curr_rl, curr_img, search_dir)
+            mse_best_obj_bb_vert, mse_best_obj_img_vert, best_mse = self.binary_search_for_obj(low_val, high_val, next_cube_bb, next_rl, next_cube_img, curr_rl, curr_img, search_dir)
 
             # now tweak to allow some recentering
-            RECENTER_PIX = 30  # check 10 pixels on each side
+            RECENTER_PIX = 30  # check 40 pixels on each side
+            print("next cube shape:", next_cube_img.shape)
             if action.startswith("UPPER_ARM") or action.startswith("LOWER_ARM"):
+              print("binary_search_for_obj: horiz")
               w_h = 0  # width
               search_dir = "HORIZ"
               low_val  = next_minw - int(RECENTER_PIX)
@@ -1091,7 +1164,9 @@ class AlsetState():
               high_val = next_maxw + int(RECENTER_PIX)
               if high_val > 223 - int(next_cube_img.shape[w_h]/2):
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
+              print("low, high val", low_val, high_val)
             elif action.startswith("GRIPPER"):
+              print("binary_search_for_obj: vert")
               w_h = 1  # height
               low_val  = next_minh - int(RECENTER_PIX)
               if low_val < int(next_cube_img.shape[w_h]/2):
@@ -1100,7 +1175,46 @@ class AlsetState():
               if high_val > 223 - int(next_cube_img.shape[w_h]/2):
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
               search_dir = "VERT"
-            mse_best_obj_bb, mse_best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, mse_best_obj_bb, next_rl, mse_best_obj_img, curr_rl, curr_img, search_dir)
+            mse_best_obj_bb, mse_best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, mse_best_obj_bb_vert, next_rl, next_cube_img, curr_rl, curr_img, search_dir)
+
+            ##################
+            # contour analysis
+            ##################
+            if mappable_cnt == 0:
+              lgbb= self.get_bb("LEFT_GRIPPER",fr_num)
+              rgbb= self.get_bb("RIGHT_GRIPPER",fr_num)
+              print("lgbb", lgbb)
+              print("rgbb", rgbb)
+            else:
+              lgbb, rgbb = None, None
+            mean_rl_img, filter_rl = self.filter_rl_from_bb_img(mse_best_obj_bb, mse_best_obj_img, curr_rl)
+            if filter_rl:
+              mse_rl = curr_rl
+            else:
+              mse_rl = None
+            # we may want to limit width if RL is significantly overlapping the cube
+            # The robot light may cause the contours to be wrong/incomplete.
+            # No RL being passed in.
+            mse_best_obj_contour_bb = get_contour_bb(curr_img, mse_best_obj_bb, mse_rl, padding_pct=.75, left_gripper_bb=lgbb, right_gripper_bb=rgbb)
+            print("mse_best_obj_contour_bb", mse_best_obj_contour_bb)
+            if mse_best_obj_contour_bb is not None:
+              mse_best_obj_contour_img = get_bb_img(curr_img, mse_best_obj_contour_bb)
+              if fr_num == 174:
+                cv2.destroyAllWindows()
+              if True:
+                print("Frame num:", fr_num)
+                print("V best MSE", mse_best_obj_bb_vert)
+                print("H best MSE", mse_best_obj_bb)
+                print("contour_bb", mse_best_obj_contour_bb)
+                cv2.imshow("next cube img", next_cube_img)
+                cv2.imshow("V best MSE", mse_best_obj_img_vert)
+                cv2.imshow("H best MSE", mse_best_obj_img)
+                cv2.imshow("curr_img", curr_img)
+                cv2.imshow("mse_best_obj_contour_bb", mse_best_obj_contour_img)
+                cv2.waitKey(0)
+              # Contour_BB seems better in general
+              mse_best_obj_bb = mse_best_obj_contour_bb
+              mse_best_obj_img = mse_best_obj_contour_img
 
             ###############
             # record MSE best cube and LBP
@@ -1237,8 +1351,7 @@ class AlsetState():
   def is_gripper_above_box(img):
       return True
 
-  # todo: rename to process_pickup_object, add other pickup-frame logic
-  def process_object_in_robot_light(self, obj_name, img_path, obj_bb, event_state, frame_num=None):
+  def process_final_grab(self, obj_name, img_path, obj_bb, event_state, frame_num=None):
       if frame_num is None:
         frame_num = self.frame_num
       ############################
@@ -1342,7 +1455,6 @@ class AlsetState():
               break
             rl_radius_img[mh,mw,:] = orig_img[mh, mw,:]
 
-        cv2.imshow("Radius Cube in RL", rl_radius_img)
         print("rl_radius", rl_radius)
         rl_img = orig_img.copy()
         mask = rl["LABEL"]==rl["LIGHT"]
@@ -1369,8 +1481,20 @@ class AlsetState():
         rl_mean_v = cv2.mean(rl_v)[0]
         event_state["ROBOT_LIGHT_MEAN_HSV"] = [rl_mean_h, rl_mean_s, rl_mean_v]
 
-      fwdpass_obj_bb = get_contour_bb(obj_img, obj_bb)
+      ##################
+      # contour analysis
+      ##################
+      fwdpass_obj_bb = obj_bb
+      lgbb= self.get_bb("LEFT_GRIPPER",frame_num)
+      rgbb= self.get_bb("RIGHT_GRIPPER",frame_num)
+      fwdpass_obj_contour_bb = get_contour_bb(obj_img, obj_bb, limit_width=True, left_gripper_bb=lgbb, right_gripper_bb=rgbb)
       print("fwdpass_obj_bb", fwdpass_obj_bb)
+      print("fwdpass_obj_contour_bb", fwdpass_obj_contour_bb)
+      fwdpass_obj_img = get_bb_img(orig_img, fwdpass_obj_bb)
+      fwdpass_obj_contour_img = get_bb_img(orig_img, fwdpass_obj_contour_bb)
+      # cv2.imshow("1fwdpass_obj_bb", fwdpass_obj_img)
+      # cv2.imshow("2fwdpass_obj_contour_bb", fwdpass_obj_contour_img)
+      # cv2.waitKey(0)
       fwdpassobj_label = "FWDPASS_" + obj_name + "_BB"  # forward pass only
       self.record_bounding_box([fwdpassobj_label], fwdpass_obj_bb, frame_num=frame_num)
 
@@ -1390,8 +1514,12 @@ class AlsetState():
         rl_mean_v = cv2.mean(rl_v)[0]
         event_state["ROBOT_LIGHT_MEAN_HSV"] = [rl_mean_h, rl_mean_s, rl_mean_v]
 
-      fwdpass_obj_bb = get_contour_bb(obj_img, obj_bb)
-      print("fwdpass_obj_bb", fwdpass_obj_bb,)
+      lgbb= self.get_bb("LEFT_GRIPPER",frame_num)
+      rgbb= self.get_bb("RIGHT_GRIPPER",frame_num)
+      fwdpass_obj_bb = obj_bb
+      fwdpass_obj_contour_bb = get_contour_bb(obj_img, obj_bb, left_gripper_bb=lgbb, right_gripper_bb=rgbb)
+      print("3fwdpass_obj_bb", fwdpass_obj_bb,)
+      print("3fwdpass_obj_contour_bb", fwdpass_obj_bb,)
       fwdpassobj_label = "FWDPASS_" + obj_name + "_BB"  # forward pass only
       self.record_bounding_box([fwdpassobj_label], fwdpass_obj_bb, frame_num=frame_num)
       obj_maxw, obj_minw, obj_maxh, obj_minh = get_min_max_borders(fwdpass_obj_bb)
@@ -1433,12 +1561,29 @@ class AlsetState():
   def is_cube_in_gripper(frame_num, action, direction):
       return False
 
-  def get_robot_arm_position(self):
-      return self.arm_state["ARM_STATE"], self.arm_state["ARM_POSITION_COUNT"]
+  def get_robot_arm_state(self, frame_num=None):
+      if frame_num is None:
+        frame_num = -1
+      arm_state      = self.frame_state[frame_num]["ARM_STATE"]
+      if len(arm_state) > 0:
+        print (frame_num,"arm state:", arm_state)
+        return arm_state
+#      # now we copy, used to have to search back.
+#      # For backward compatability, should delete soon.
+#      print("num frame states togo",len(self.frame_state)-frame_num)
+#      frame_num = self.frame_num
+#      for i in range(len(self.frame_state)-frame_num):
+#        if len(self.frame_state[frame_num-i]["ARM_STATE"]) > 0:
+#          print (frame_num-i,"arm state:", self.frame_state[frame_num-i]["ARM_STATE"], len(self.frame_state[frame_num-i]["ARM_STATE"]), len(self.frame_state)-frame_num)
+#          return self.frame_state[frame_num-i]["ARM_STATE"]
+#        else:
+#          print (frame_num-i,"frame state:", self.frame_state[frame_num-i])
+      print("no arm state")
+      return {}
 
   def get_robot_gripper_position(self, frame_num=None):
       if frame_num is None:
-        frame_num = self.frame_num
+        frame_num = -1
       gripper_state = self.frame_state[frame_num]["GRIPPER_STATE"]
       gripper_position = gripper_state["GRIPPER_POSITION"]
       return gripper_position
@@ -1447,10 +1592,18 @@ class AlsetState():
       # don't update map / location
       # combine history with optical flow estimates
       if action in ["FORWARD", "REVERSE", "LEFT", "RIGHT"]:
+        print("action: ", action)
         if fr_num is None:
           fr_num = -1
-        if self.frame_state[fr_num]["KNOWN_STATE"] == "ARM_RETRACTED":
+        arm_state = self.get_robot_arm_state(fr_num)
+        print("ARM STATE: ", arm_state)
+        if len(arm_state) == 0:
+          return False
+        if arm_state["ARM_POSITION"] == "ARM_RETRACTED":
           return True
+      arm_state = self.get_robot_arm_state(fr_num)
+      print("unmappable action: ", action, arm_state["ARM_POSITION"])
+      # return True  # Hack until regenerate state
       return False
 
   def record_metrics(self, frame_path, data):
@@ -1464,7 +1617,7 @@ class AlsetState():
 
   def record_location(self, origin, location, orientation):
       # Note: stored as part of the frame_state
-      self.location["ORIGIN"]      = origin.copy()
+      self.location["MAP_ORIGIN"]  = origin.copy()
       self.location["LOCATION"]    = location.copy()
       self.location["ORIENTATION"] = orientation
       record_hist = False
@@ -1493,12 +1646,13 @@ class AlsetState():
   # known state: keep track of arm movements since the arm was 
   # parked in a known position
   # 
-  def set_known_robot_state(self, frame_num, new_known_state):
-      self.state_history.append([self.robot_state[:]])
-      self.robot_state["KNOWN_STATE"] = new_known_state
+  def set_known_robot_state(self, frame_num, known_state):
+      # self.state_history.append([self.robot_state[:]])
+      self.robot_state["ARM_STATE"] = known_state
       self.robot_state["DELTA"] = False
-      for action in self.arm_actions_no_wrist:
+      for action in self.cfg.arm_actions_no_wrist:
         self.robot_state[action] = 0
+      print("set known robot state:", frame_num, known_state)
 
   def get_robot_state(self):
       return [self.robot_state]
@@ -1517,6 +1671,10 @@ class AlsetState():
         with open(filename, 'wb') as outp:  # Overwrites any existing file.
           pickle.dump(self, outp, pickle.HIGHEST_PROTOCOL)
 
+  def load_state_completed(self):
+      self.restart_frame_num = self.last_frame_state("FRAME_NUM")
+      print("restart frame:", self.restart_frame_num)
+
   def load_state(self, filename):
       """ Deserialize a file of pickled objects. """
       loaded = False
@@ -1530,15 +1688,14 @@ class AlsetState():
                 print("pickle load", obj.app_name)
             except EOFError:
                 # print("pickle EOF")
-                
                 return obj
-      except:
-        return self
+      except Exception as e:
+        print("load_state exception: ", e)
       # print("load: False")
       return self
 
   # "APP_NAME" "APP_RUN_NUM" "APP_RUN_ID" "APP_MODE" "FUNC_STATE" "FRAME_STATE" 
-  # "GRIPPER_STATE" "BOUNDING_BOXES" "ACTIONS" "FINAL_MAP" "LOCATION_ORIGIN" 
+  # "GRIPPER_STATE" "BOUNDING_BOXES" "ACTIONS" "FINAL_MAP" "MAP_ORIGIN" 
   # "MEAN_LIGHTING" "ACTIVE_MAP"
   # "PICKUP" "DROP" "LOCAL_BINARY_PATTERNS" "FUNC_FRAME_START" "FUNC_FRAME_END"
   def last_app_state(self, key):
@@ -1553,10 +1710,14 @@ class AlsetState():
 
   # "ACTION" "FRAME_PATH" "FRAME_NUM" "FUNCTION_NAME" "MEAN_DIF_LIGHTING"
   # "MOVE_ROTATION" "MOVE_STRAIGHT" "LOCATION" "ARM_STATE" "GRIPPER_STATE"
-  # "KNOWN_STATE" "PREDICTED_MOVE" "BOUNDING_BOX_LABELS" "BOUNDING_BOX"
+  # "PREDICTED_MOVE" "BOUNDING_BOX_LABELS" "BOUNDING_BOX"
   # "BOUNDING_BOX_PATH" "BOUNDING_BOX_IMAGE_SYMLINK" 
   def last_frame_state(self, key):
-      return self.frame_state[-1][key]
+      try:
+        state = self.frame_state[-1][key]
+        return state
+      except:
+        return None
 
   # to reload predictions
   def get_action(self, fr_num):
@@ -1583,8 +1744,8 @@ class AlsetState():
         frame_num = self.frame_num
       self.frame_state[frame_num]["ROBOT_LIGHT"]  = copy.deepcopy(rl)
 
-  def get_robot_light_img(self, full_img, rl):
-      rlimg  = full_img.copy()
+  def get_robot_light_img(self, full_img_path, rl):
+      rlimg = cv2.imread(full_img_path)
       center = np.uint8(rl["CENTER"].copy())
       rl_copy = rl["LABEL"].copy()
       res    = center[rl_copy.flatten()]
@@ -1599,43 +1760,28 @@ class AlsetState():
       bb_maxw, bb_minw, bb_maxh, bb_minh = get_min_max_borders(bb)
       bb_mask = np.zeros((bb_maxh-bb_minh, bb_maxw-bb_minw), dtype="uint8")
       bb_mask[0:bb_maxh-bb_minh,0:bb_maxw-bb_minw]=mask[bb_minh:bb_maxh,bb_minw:bb_maxw]
-      # try:
-      if True:
-        rl_img_hsv  = cv2.cvtColor(rl_img.copy(), cv2.COLOR_BGR2HSV)
-        rl_h, rl_s, rl_v = cv2.split(rl_img_hsv)
-        # rl_mean_h = cv2.mean(rl_h)[0]
-        # rl_mean_s = cv2.mean(rl_s)[0]
-        rl_mean_v = cv2.mean(rl_v)[0]
+      rl_img_hsv  = cv2.cvtColor(rl_img.copy(), cv2.COLOR_BGR2HSV)
+      rl_h, rl_s, rl_v = cv2.split(rl_img_hsv)
+      # rl_mean_h = cv2.mean(rl_h)[0]
+      # rl_mean_s = cv2.mean(rl_s)[0]
+      rl_mean_v = cv2.mean(rl_v)[0]
 
-        nonlight = 1 - rl["LIGHT"]
-        print("light cnt in bb:", nonlight, np.count_nonzero(bb_mask), len(bb_mask)*len(bb_mask[0]), bb)
-        # mean_nonlight_color    = [0,0,0]
-        # mean_nonlight_color[0] = np.mean(rl_img[bb_mask==nonlight,0])
-        # mean_nonlight_color[1] = np.mean(rl_img[bb_mask==nonlight,1])
-        # mean_nonlight_color[2] = np.mean(rl_img[bb_mask==nonlight,2])
-        # print("3 mean nonlight color ", mean_nonlight_color, nonlight, rl["LIGHT"])
-        nonlight_mean_v = np.mean(rl_v[bb_mask==nonlight])
-        print("3 nonlight mean v ", nonlight_mean_v)
-        rl_v[bb_mask==rl["LIGHT"]] = nonlight_mean_v
-        rl_img = cv2.merge([rl_h, rl_s, rl_v])
-        # rl_img[bb_mask==rl["LIGHT"],:] = [0,0,0]
-        # rl_img[bb_mask==rl["LIGHT"],:] = mean_nonlight_color[:]
-        # rl_img[bb_mask==rl["LIGHT"],:] = mean_nonlight_color
-        # cv2.imshow("3MEANNONLIGHT", rl_img)
-        # cv2.waitKey(0)
+      nonlight = 1 - rl["LIGHT"]
+      print("light cnt in bb:", nonlight, np.count_nonzero(bb_mask), len(bb_mask)*len(bb_mask[0]), bb)
+      nonlight_mean_v = np.mean(rl_v[bb_mask==nonlight])
+      light_mean_v = np.mean(rl_v[bb_mask==rl["LIGHT"]])
+      print("3 nonlight mean v ", nonlight_mean_v)
+      print("3b   light mean v ", light_mean_v)
+      if nonlight_mean_v / light_mean_v > .7:
+        # TODO: record the values, figure out the proper ratio
+        # gap not big enough; Robot Light might not be a factor.
+        print("light mean ratios too big: turn of light filtering") 
+        return bbimg, False
+      rl_v[bb_mask==rl["LIGHT"]] = nonlight_mean_v
+      rl_img = cv2.merge([rl_h, rl_s, rl_v])
+      # cv2.imshow("3MEANNONLIGHT", rl_img)
+      # cv2.waitKey(0)
 
-      else:
-      # except Exception as e:
-        print("Expected Error? ", e)
-        nonlight = 1 - rl["LIGHT"]
-        # if grayscale
-        # nonlight_color = rl["CENTER"][1 - rl["LIGHT"]][0]
-        nonlight_color = (rl["CENTER"][0] + rl["CENTER"][1]) / 2
-        rl_img[bb_mask==rl["LIGHT"]] = nonlight_color
-        print("0CENTER ", nonlight_color, nonlight, rl["LIGHT"])
-        cv2.imshow("0CENTER", rl_img)
-        cv2.waitKey(0)
-      # cv2.waitKey()
-      return rl_img
+      return rl_img, True
 
 

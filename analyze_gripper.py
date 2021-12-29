@@ -185,7 +185,8 @@ class AnalyzeGripper():
       self.alset_state.record_drivable_ground(safe_ground_bb, safe_ground_img)
       return [safe_ground_bb, safe_ground_img]
 
-  def analyze(self, frame_num, action, prev_img_path, curr_img_path, done=False, curr_func_name=None):
+  def analyze(self, action, prev_img_path, curr_img_path, done=False, curr_func_name=None):
+      frame_num = self.alset_state.get_frame_num()
       left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info = [],[],[None]
       if self.gripper_open_cnt == 0 and self.gripper_close_cnt == 0:
         init = True
@@ -415,10 +416,10 @@ class AnalyzeGripper():
       # note: safe_ground_info recorded by self.get_drivable_ground()
       return [left_gripper_bounding_box, right_gripper_bounding_box, safe_ground_info[0]]
 
-  def check_cube_in_gripper(self, frame_num, action, prev_img_path, curr_img_path, done):
+  def check_cube_in_gripper(self, action, prev_img_path, curr_img_path, done):
       pass
 
-  def label_gripper(self, frame_num, action, prev_img_path, curr_img_path, done=False):
+  def label_gripper(self, action, prev_img_path, curr_img_path, done=False):
 
       ret_val = [[label, bounding_box],[label, bounding_box]]
       return ret_val

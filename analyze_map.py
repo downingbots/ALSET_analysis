@@ -344,9 +344,11 @@ class AnalyzeMap():
           # cv2.imshow("nonintersecting rnm", rnm2)
           # cv2.waitKey(0)
           pass
-        
-        intersect_mol = image_in_border(intersect_border, gray_mol)
-        intersect_rnm = image_in_border(intersect_border, gray_rnm)
+          intersect_mol = None
+          intersect_rnm = None
+        else:
+          intersect_mol = image_in_border(intersect_border, gray_mol)
+          intersect_rnm = image_in_border(intersect_border, gray_rnm)
         if intersect_mol is None or intersect_rnm is None:
           print("no intersect:",intersect_mol, intersect_rnm)
           return self.cfg.INFINITE, self.cfg.INFINITE, self.cfg.INFINITE
@@ -679,7 +681,7 @@ class AnalyzeMap():
           print("pos, score1:", (best_mse_pos, best_mse_score), (best_ssim_pos, best_ssim_score)) 
           print("pos, score2:", (best_lbp_pos, best_lbp_score), (best_metric_pos, best_metric_score))
           print("pos, score3:", (mse_pos, mse_score, ssim_score, lbp_score))
-        if False and self.frame_num >= self.stop_at_frame:
+        if False and self.alset_state.get_frame_num() >= self.stop_at_frame:
           ### Plot Metric Results
           plt.figure(figsize=(15,9))
           plt.subplot(211);plt.title("Curve fit");plt.xlabel("samples - k")
@@ -783,7 +785,7 @@ class AnalyzeMap():
           s = 1 - s   # make "lower is better"
         except:
           s = None
-        if False and self.frame_num >= self.stop_at_frame:
+        if False and self.alset_state.get_frame_num() >= self.stop_at_frame:
           # setup the figure
           fig = plt.figure(title)
           plt.suptitle("MSE: %.2f, SSIM: %.2f" % (m, s))
@@ -1003,9 +1005,8 @@ class AnalyzeMap():
         # new_map_location is the relative location from origin
         map_shape, map_border = real_map_border(map)
         new_map_shape, new_map_border = real_map_border(new_map)
+        print("map_borders :", map_border, new_map_border, self.frame_num)
         # find overlap
-        # map_maxh, map_minh, map_maxw, map_minw = get_min_max_borders(map_border)
-        # new_map_maxh, new_map_minh, new_map_maxw, new_map_minw = get_min_max_borders(new_map_border)
         map_maxw, map_minw, map_maxh, map_minh = get_min_max_borders(map_border)
         new_map_maxw, new_map_minw, new_map_maxh, new_map_minh = get_min_max_borders(new_map_border)
         print("new_map/map minw:", new_map_minw, map_minw)
@@ -1022,8 +1023,6 @@ class AnalyzeMap():
             # ARD: var 3
             fm_h = h + new_map_location[0]
             fm_w = w + new_map_location[1]
-            # fm_h = h + new_map_location[1]
-            # fm_w = w + new_map_location[0]
             if final_map[fm_h,fm_w].all() == 0:
               final_map[fm_h,fm_w] = new_map[h,w]
             elif new_map[h,w].all() == 0:
@@ -1073,22 +1072,23 @@ class AnalyzeMap():
           map_ovrlay_no_brdr = cv2.resize(map_ovrlay_no_brdr, resized_map)
           self.alset_state.record_map_overlay(map_ovrlay_no_brdr)
           self.alset_state.record_location(self.robot_origin, self.robot_location_from_origin, self.robot_orientation)
-          if self.frame_num >= 400:
-            cv2.imshow("trimmed map_overlay", map_ovrlay_no_brdr)
-            cv2.waitKey(0)
+          if self.alset_state.get_frame_num() >= 400:
+            # cv2.imshow("trimmed map_overlay", map_ovrlay_no_brdr)
+            # cv2.waitKey(0)
+            pass
           return map_ovrlay_no_brdr
 
     #################################
     # CREATE MAP - main map driver routine
     #################################
 
-    def analyze(self, frame_num, action, prev_img_pth, curr_img_pth, done):
-        self.frame_num = frame_num
+    def analyze(self, action, prev_img_pth, curr_img_pth, done):
         # curr_image = cv2.imread(curr_img_pth)
+        self.frame_num = self.alset_state.get_frame_num()
         curr_image,mean_diff,rl = self.cvu.adjust_light(curr_img_pth)
         curr_image_KP = Keypoints(curr_image)
         # ARD: TODO: fix frame_num hack
-        if frame_num > 213:
+        if self.alset_state.get_frame_num() > 213:
           bird_eye_vw = self.get_birds_eye_view(curr_image, maskmode="CLOSED_GRIPPER")
           # cv2.imshow("Birds eye", bird_eye_vw )
           # cv2.waitKey(0)
@@ -1150,11 +1150,11 @@ class AnalyzeMap():
           ###########################
           if action in ["LEFT","RIGHT"]:
             best_angle = self.find_best_rotation(action, self.prev_move,
-                            self.curr_move, frame_num)
+                            self.curr_move, self.frame_num)
             print("Final Best Angle: ", best_angle)
           elif action in ["FORWARD","REVERSE"]:
             best_move = self.analyze_fwd_rev(action, self.prev_move,
-                            self.curr_move, frame_num)
+                            self.curr_move, self.frame_num)
             print("Final Best Move: ", best_move)  # in pixels
 
           ###########################
@@ -1192,10 +1192,6 @@ class AnalyzeMap():
             self.robot_location_history.append(self.robot_location.copy())
             self.robot_location_from_origin[0] += int(round(pix_h))
             self.robot_location_from_origin[1] += int(round(pix_w))
-            # self.robot_location[1] += int(round(pix_h))
-            # self.robot_location[0] += int(round(pix_w))
-            # self.robot_location_from_origin[1] += int(round(pix_h))
-            # self.robot_location_from_origin[0] += int(round(pix_w))
 
           ###########################
           # Global Mapping
@@ -1206,25 +1202,22 @@ class AnalyzeMap():
           # rotate about the robot (local positioning, global orientation)
           rotated_new_map = add_border(self.curr_move.copy(), self.border_buffer)
           rotated_new_map = rotate_about_robot(rotated_new_map, self.robot_orientation, self.robot_origin)
-          if self.frame_num >= 300:
-            # cv2.imshow("rotated_new_map", rotated_new_map)
-            # cv2.imshow("map", self.map)
-            # cv2.waitKey(0)
+          if False and self.alset_state.get_frame_num() >= 300:
+            cv2.imshow("rotated_new_map", rotated_new_map)
+            cv2.imshow("map", self.map)
+            cv2.waitKey(0)
             pass
 
-#          # move frame to global robot location
-#          # print("self.robot_location_from_origin", self.robot_location_from_origin, self.gripper_offset_height)
-#
-#          # rotated_new_map = replace_border(rotated_new_map, int(self.map.shape[0]), int(self.map.shape[1]), (self.robot_location[0]-self.gripper_offset_height), self.robot_location[1])
-#          # rotated_new_map = replace_border(rotated_new_map, int(rotated_new_map.shape[0]), int(rotated_new_map.shape[1]), (self.robot_location_from_origin[0]-self.gripper_offset_height), self.robot_location_from_origin[1])
-#
-#          # rotate frame to global robot orientation
-#          # rotated_new_map = rotate_about_robot(rotated_new_map, self.robot_orientation, self.robot_location)
-#          # rotated_new_map = rotate_about_robot(rotated_new_map, self.robot_orientation, self.robot_location_from_origin)
-
           # move frame to global robot location and merge with current map`
-          self.map = self.merge_maps(self.map, rotated_new_map, self.robot_location_from_origin)
-          # self.map = self.merge_maps(self.map, rotated_new_map, self.robot_location)
+          # try:
+          if True:
+            print("orientation:", self.robot_orientation, self.robot_location_from_origin)
+            self.map = self.merge_maps(self.map, rotated_new_map, self.robot_location_from_origin)
+          # except:
+          else:
+            cv2.imshow("rotated_new_map", rotated_new_map)
+            cv2.imshow("map", self.map)
+            cv2.waitKey(0)
           self.map_overlay = self.map.copy()
           overlay = self.add_robot_to_overlay()
           scale_factor = .1
@@ -1241,7 +1234,7 @@ class AnalyzeMap():
 
           return 
 
-    def alset_ratslam_replay(self, frame_num):
+    def alset_ratslam_replay(self):
         action = self.alset_state.last_frame_state("ACTION")
         if action in ["FORWARD","REVERSE","LEFT","RIGHT"]:
           curr_image_path = self.alset_state.last_frame_state("FRAME_PATH")
