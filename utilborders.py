@@ -768,8 +768,8 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False, padding_pct=None
       rgbb = copy.deepcopy(right_gripper_bb)
       if intersect_borders(lgbb, obj_bb) or intersect_borders(rgbb, obj_bb):
         print("intersection: skip gripper filter", lgbb, rgbb, obj_bb)
-        # lgbb = trim_gripper(lgbb, obj_bb)
-        # rgbb = trim_gripper(rgbb, obj_bb)
+        lgbb = trim_gripper(lgbb, obj_bb)
+        rgbb = trim_gripper(rgbb, obj_bb)
       # try again
       if lgbb is None or rgbb is None:
         print("Trim failed: skip gripper filter", lgbb, rgbb, obj_bb)
@@ -800,6 +800,7 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False, padding_pct=None
         approx_skip = 0
         approx_process = 0
         approx_in_objbb = 0
+        approx_process_pts = []
         for pt in approximations:
           # skip corners, note shape xy, pt hw are reversed
           if pt[0][0] in [0, obj_img.shape[xy2hw(0)]-1] and pt[0][1] in [0, obj_img.shape[xy2hw(1)]-1]:
@@ -827,8 +828,13 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False, padding_pct=None
           # TODO: Have an expected size
           # TODO: Have an expected range of movement
           approx_process += 1
-          process_pts.append([pt[0][0],pt[0][1]])
+          approx_process_pts.append([pt[0][0],pt[0][1]])
+          # process_pts.append([pt[0][0],pt[0][1]])
         print(c,"approx_in_objbb, skipped, processed ", approx_in_objbb, approx_skip, approx_process)
+        if approx_skip > approx_in_objbb and approx_skip > approx_process:
+          pass
+        else:
+          process_pts.extend(approx_process_pts)
 
     if rlcnt >= .5 * len(process_pts):
         # TODO: tune this value over time
