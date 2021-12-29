@@ -822,21 +822,27 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False, padding_pct=None
               skip_pts.append([pt[0][0],pt[0][1]])
               approx_skip += 1
               continue
-          if point_in_border(bb, pt[0], bufzone=-1):
-            approx_in_objbb += 1
-          # TODO: filter approximations that are outside the expected range
+          if not point_in_border(bb, pt[0], bufzone=-1):
+            # filter approximations that are outside the expected BB
+            skip_pts.append([pt[0][0],pt[0][1]])
+            approx_skip += 1
+            continue
           # TODO: Have an expected size
           # TODO: Have an expected range of movement
-          approx_process += 1
+          approx_in_objbb += 1
           approx_process_pts.append([pt[0][0],pt[0][1]])
           # process_pts.append([pt[0][0],pt[0][1]])
         print(c,"approx_in_objbb, skipped, processed ", approx_in_objbb, approx_skip, approx_process)
-        if approx_skip > approx_in_objbb and approx_skip > approx_process:
-          pass
-        else:
-          process_pts.extend(approx_process_pts)
+        process_pts.extend(approx_process_pts)
+#        # The following tried to pull out bad contours that we grouped together.
+#        # Unfortunately, the grouping is poor and too many good pts were getting
+#        # filtered out.
+#        if approx_skip > approx_in_objbb and approx_skip > approx_process:
+#          pass
+#        else:
+#          process_pts.extend(approx_process_pts)
 
-    if rlcnt >= .5 * len(process_pts):
+    if filter_rl and rlcnt >= .5 * len(process_pts):
         # TODO: tune this value over time
         print("RL: set limit_width", rlcnt, len(process_pts))
         limit_width = True
@@ -952,8 +958,8 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False, padding_pct=None
         if delta_y < MIN_HEIGHT:
           delta_y = MIN_HEIGHT
           print("MIN_HEIGHT:", MIN_HEIGHT)
-        if limit_width or (orig_maxx-orig_minx)*.75 <= delta_x:
-          print(".75 size => padding:", (orig_maxy - orig_miny) * .75, (pad_maxy - pad_miny))
+        if limit_width or (orig_maxx-orig_minx)/2*.75 <= delta_x:
+          print(".75 size => padding:", (orig_maxy - orig_miny)/2 * .75, (pad_maxy - pad_miny))
           # following keeps the same size bb but recenters it.
           cropped_obj_bb = make_bb(pad_maxx, pad_minx, pad_maxy, pad_miny)
           cropped_obj_ctr = bounding_box_center(cropped_obj_bb)

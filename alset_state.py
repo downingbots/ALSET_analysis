@@ -515,7 +515,10 @@ class AlsetState():
         pass
       # apply new filter to old cube img
       # obj_no_rl_img = self.filter_rl_from_bb_img(obj_bb, obj_img, rl)
-      obj_mean_rl_img, filter_rl = self.filter_rl_from_bb_img(obj_bb, obj_img, obj_rl)
+      if obj_rl is not None:
+        obj_mean_rl_img = self.filter_rl_from_bb_img(obj_bb, obj_img, obj_rl)
+      else:
+        obj_mean_rl_img = obj_img
       # cv2.imshow("1BB Robot Light filter", obj_mean_rl_img)
       min_mse = self.cfg.INFINITE
       best_obj_bb  = None
@@ -537,7 +540,10 @@ class AlsetState():
             # To avoid training on the Robot Light, the mse of the cube BB should skip 
             # the robot light BB.
             new_obj_img = get_bb_img(full_img, new_obj_bb)
-            new_obj_mean_rl_img, filter_rl = self.filter_rl_from_bb_img(new_obj_bb, new_obj_img, new_rl)
+            if new_rl is not None:
+              new_obj_mean_rl_img = self.filter_rl_from_bb_img(new_obj_bb, new_obj_img, new_rl)
+            else:
+              new_obj_mean_rl_img = new_obj_img
             # apply new filter to new cube img
             # new_obj_no_rl_img = self.filter_rl_from_bb_img(new_obj_bb, new_obj_img, rl)
             # if self.target is not None:
@@ -663,6 +669,8 @@ class AlsetState():
           high_val = 223 - int(prev_obj_img.shape[w_h]/2)
         # use the best_obj_bb's postition, but the prev_obj_img for img comparison
         # best_obj_bb, best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, curr_rl, best_obj_bb, prev_obj_img, curr_img, "VERT")
+
+        # Note: Assume RL is a factor when the grippers are trying to pick up.
         best_obj_bb, best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, best_obj_bb, prev_rl, prev_obj_img, curr_rl, curr_img, "VERT")
         # Was contour analysis here - but didn't work well enough
         new_obj_img = best_obj_img
@@ -1138,6 +1146,7 @@ class AlsetState():
               high_val = next_maxh + int(next_cube_img.shape[w_h]/2)
               if high_val > 223 - int(next_cube_img.shape[w_h]/2):
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
+              print("V low, high val", low_val, high_val)
               search_dir = "VERT"
             elif action.startswith("GRIPPER"):
               print("binary_search_for_obj: horiz")
@@ -1149,7 +1158,21 @@ class AlsetState():
               if high_val > 223 - int(next_cube_img.shape[w_h]/2):
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
               search_dir = "HORIZ"
-            mse_best_obj_bb_vert, mse_best_obj_img_vert, best_mse = self.binary_search_for_obj(low_val, high_val, next_cube_bb, next_rl, next_cube_img, curr_rl, curr_img, search_dir)
+            # The robot light makes a huge difference in results, but figuring out
+            # when the robot light should (not) be considered is not trivial.
+            # Run twice (with and without RL) and take lowest mse..
+            rl_mse_best_obj_bb_vert, rl_mse_best_obj_img_vert, rl_best_mse = self.binary_search_for_obj(low_val, high_val, next_cube_bb, next_rl, next_cube_img, curr_rl, curr_img, search_dir)
+            norl_mse_best_obj_bb_vert, norl_mse_best_obj_img_vert, norl_best_mse = self.binary_search_for_obj(low_val, high_val, next_cube_bb, None, next_cube_img, None, curr_img, search_dir)
+            if norl_best_mse <= rl_best_mse:
+              # lower is better
+              mse_best_obj_bb_vert = norl_mse_best_obj_bb_vert
+              mse_best_obj_img_vert = norl_mse_best_obj_img_vert
+              filter_rl = False
+            else:
+              mse_best_obj_bb_vert = rl_mse_best_obj_bb_vert
+              mse_best_obj_img_vert = rl_mse_best_obj_img_vert
+              filter_rl = True
+            print("V filter rl, norlmse, rlmse", filter_rl, norl_best_mse, rl_best_mse)
 
             # now tweak to allow some recentering
             RECENTER_PIX = 30  # check 40 pixels on each side
@@ -1164,7 +1187,7 @@ class AlsetState():
               high_val = next_maxw + int(RECENTER_PIX)
               if high_val > 223 - int(next_cube_img.shape[w_h]/2):
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
-              print("low, high val", low_val, high_val)
+              print("H low, high val", low_val, high_val)
             elif action.startswith("GRIPPER"):
               print("binary_search_for_obj: vert")
               w_h = 1  # height
@@ -1175,7 +1198,18 @@ class AlsetState():
               if high_val > 223 - int(next_cube_img.shape[w_h]/2):
                 high_val = 223 - int(next_cube_img.shape[w_h]/2)
               search_dir = "VERT"
-            mse_best_obj_bb, mse_best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, mse_best_obj_bb_vert, next_rl, next_cube_img, curr_rl, curr_img, search_dir)
+            rl_mse_best_obj_bb, rl_mse_best_obj_img, rl_best_mse = self.binary_search_for_obj(low_val, high_val, mse_best_obj_bb_vert, next_rl, next_cube_img, curr_rl, curr_img, search_dir)
+            norl_mse_best_obj_bb, norl_mse_best_obj_img, norl_best_mse = self.binary_search_for_obj(low_val, high_val, mse_best_obj_bb_vert, None, next_cube_img, None, curr_img, search_dir)
+            if norl_best_mse <= rl_best_mse:
+              mse_best_obj_bb = norl_mse_best_obj_bb
+              mse_best_obj_img = norl_mse_best_obj_img
+              filter_rl = False
+            else:
+              mse_best_obj_bb = rl_mse_best_obj_bb
+              mse_best_obj_img = norl_mse_best_obj_img
+              filter_rl = True
+            print("H filter rl, norlmse, rlmse", filter_rl, norl_best_mse, rl_best_mse)
+
 
             ##################
             # contour analysis
@@ -1187,7 +1221,8 @@ class AlsetState():
               print("rgbb", rgbb)
             else:
               lgbb, rgbb = None, None
-            mean_rl_img, filter_rl = self.filter_rl_from_bb_img(mse_best_obj_bb, mse_best_obj_img, curr_rl)
+            # used to try to determine to filter Robot Light in following func:
+            # mean_rl_img, fitler_rl = self.filter_rl_from_bb_img(mse_best_obj_bb, mse_best_obj_img, curr_rl)
             if filter_rl:
               mse_rl = curr_rl
             else:
@@ -1195,11 +1230,11 @@ class AlsetState():
             # we may want to limit width if RL is significantly overlapping the cube
             # The robot light may cause the contours to be wrong/incomplete.
             # No RL being passed in.
-            mse_best_obj_contour_bb = get_contour_bb(curr_img, mse_best_obj_bb, mse_rl, padding_pct=.75, left_gripper_bb=lgbb, right_gripper_bb=rgbb)
+            mse_best_obj_contour_bb = get_contour_bb(curr_img, mse_best_obj_bb, mse_rl, padding_pct=.25, left_gripper_bb=lgbb, right_gripper_bb=rgbb)
             print("mse_best_obj_contour_bb", mse_best_obj_contour_bb)
             if mse_best_obj_contour_bb is not None:
               mse_best_obj_contour_img = get_bb_img(curr_img, mse_best_obj_contour_bb)
-              if fr_num == 174:
+              if fr_num == 160:
                 cv2.destroyAllWindows()
               if True:
                 print("Frame num:", fr_num)
@@ -1754,6 +1789,8 @@ class AlsetState():
 
   def filter_rl_from_bb_img(self, bb, bbimg, rl):
       IMG_HW = 224
+      # rl is full-image. bbimg is only for bb subset.  Use bb to get bb_mask 
+      # and rl_img subset. 
       rl_img = bbimg.copy()
       mask = rl["LABEL"].copy()
       mask = mask.reshape((IMG_HW,IMG_HW))
@@ -1768,20 +1805,30 @@ class AlsetState():
 
       nonlight = 1 - rl["LIGHT"]
       print("light cnt in bb:", nonlight, np.count_nonzero(bb_mask), len(bb_mask)*len(bb_mask[0]), bb)
+      # (non)light_mean_v is the mean just for the bb subset.
       nonlight_mean_v = np.mean(rl_v[bb_mask==nonlight])
       light_mean_v = np.mean(rl_v[bb_mask==rl["LIGHT"]])
       print("3 nonlight mean v ", nonlight_mean_v)
       print("3b   light mean v ", light_mean_v)
-      if nonlight_mean_v / light_mean_v > .7:
-        # TODO: record the values, figure out the proper ratio
-        # gap not big enough; Robot Light might not be a factor.
-        print("light mean ratios too big: turn of light filtering") 
-        return bbimg, False
+      # if nonlight_mean_v / light_mean_v > .7:
+      # # record the values, figure out the proper ratio
+      # # gap not big enough; Robot Light might not be a factor.
+      # # The means change over time. For example, when the dark floor starts to be
+      # # seen as the robot gets closer to the edge of a white table, then the ratio 
+      # # will go down. Interestingly, even when doing just the bb subset that doesn't
+      # # have the dark floor, the bb light mean ration goes down.
+      # # We need to stop filtering out the light at some point to prevent wrong H/V mse
+      # # results.
+      # # 
+      # # New Approach: Run twice; with RL and without RL and choose the best mse.
+      #  print("light mean ratios too big: turn of light filtering") 
+      # return bbimg, False
       rl_v[bb_mask==rl["LIGHT"]] = nonlight_mean_v
       rl_img = cv2.merge([rl_h, rl_s, rl_v])
       # cv2.imshow("3MEANNONLIGHT", rl_img)
       # cv2.waitKey(0)
 
-      return rl_img, True
+      return rl_img
+      # return rl_img, True
 
 
