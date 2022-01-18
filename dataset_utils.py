@@ -24,6 +24,26 @@
 ##  ./apps/FUNC/FUNC_MODEL.pth
 #
 ##################################################
+# YOLO
+#
+# yolo_dataset_dir (None): the dataset directory. If omitted, ``data_path``
+#           and/or ``labels_path`` must be provided
+# yolo_data_path (None): a folder name like ``"data"`` or ``"data/"`` specifying a
+#           subfolder of ``dataset_dir`` where the media files reside
+#           If None, this parameter will default to whichever of ``data/`` or
+#          ``data.json`` exists in the dataset directory
+# yolo_labels_path (None): a folder name like ``"labels"`` or ``"labels/"`` 
+#           specifying the location of the labels in ``dataset_dir``
+#           If None, the labels are assumed to be in the same folder as the data
+# yolo_images_path (None): a filename like ``"images.txt"`` specifying the 
+#           location of the image listing file labels in ``dataset_dir``
+#           If None, the parameter will default to ``images.txt``
+# yolo_objects_path (None): a filename like ``"obj.names"`` specifying the 
+#           location of the object names file labels in ``dataset_dir``
+#           If None, the parameter will default to ``obj.names``
+# yolo_classes (None): the list of possible class labels. This does not need
+#           to be provided if ``objects_path`` contains the class labels
+##################################################
 # APP
 ##################################################
 # DQN
@@ -634,5 +654,33 @@ class DatasetUtils():
               os.symlink(source_file, symlnk)
               print("symlink {symlnk} {source_file}")
           except FileExistsError:
-            # print('symlink already exists')
+            print('symlink already exists')
+            os.remove(symlnk)
+            os.symlink(source_file, symlnk)
+            print("symlink {symlnk} {source_file}")
             pass
+
+    ##################################################
+    # YOLO
+    # path: ./apps/ALSET_YOLOV5_DATASET  # dataset root dir
+    # train: images/train/
+    # val: images/validate/
+    ##################################################
+    def yolo_dataset_dir(self):
+        dir = self.cfg.APP_DIR + "ALSET_YOLOV5_DATASET/"
+        return dir
+    
+    def yolo_dataset_yaml(self):
+        return self.yolo_dataset_dir() + "alset_yolov5.yaml"
+    
+    def yolo_images_train_path(self):
+        return self.yolo_dataset_dir() + "images/train/"
+    def yolo_images_val_path(self):
+        return self.yolo_dataset_dir() + "images/validate/"
+        # return "data.jason"
+    
+    def yolo_labels_train_path(self): 
+        return self.yolo_dataset_dir() + "labels/train/"
+    def yolo_labels_val_path(self): 
+        return self.yolo_dataset_dir() + "labels/validate/"
+    
