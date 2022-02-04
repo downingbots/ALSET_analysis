@@ -10,7 +10,7 @@ YOLO format, with one *.txt file per image (if no objects in image, no *.txt fil
     Box coordinates must be in normalized xywh format (from 0 - 1). If your boxes are in pixels, divide x_center and width by image width, and y_center and height by image height.
     Class numbers are zero-indexed (start from 0)
  
-$ python train.py --img 640 --batch 16 --epochs 5 --data alset_yolov5.yaml --weights yolov5n.pt
+# python3 yolov5-6.0/train.py --img 640 --batch 16 --epochs 5 --data alset_yolov5.yaml --weights yolov5-6.0/yolov5n.pt
 """
 import yaml
 import os

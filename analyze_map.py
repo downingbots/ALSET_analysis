@@ -69,16 +69,17 @@ class AnalyzeMap():
           return 
         location = self.alset_state.last_frame_state("LOCATION")
         try:
-          self.robot_location = location["LOCATION"].copy()
-          self.robot_origin   = location["ORIGIN"].copy()
+          self.robot_location_from_origin = location["LOCATION_FROM_ORIGIN"].copy()
+          self.robot_location    = location["LOCATION"].copy()
+          self.robot_origin      = location["ORIGIN"].copy()
           self.robot_orientation = location["ORIENTATION"].copy()
         except:
           full_hist = self.alset_state.last_app_state("LOCATION_HISTORY")
-          [self.robot_location, self.robot_origin, self.robot_orientation, frn] = full_hist[-1]
+          [self.robot_location, self.robot_location_from_origin, self.robot_origin, self.robot_orientation, frn] = full_hist[-1]
 
         self.robot_location_history = []
         full_hist = self.alset_state.last_app_state("LOCATION_HISTORY")
-        for [loc, origin, orient, frn] in full_hist:
+        for [loc_origin, loc, origin, orient, frn] in full_hist:
           self.robot_location_history.append(loc.copy())
         ################################################################
         # most global state is reassigned while processing each frame
@@ -336,8 +337,8 @@ class AnalyzeMap():
         if len(intersect_border) == 0:
           print("non-intersecting mol_border:", mol_border)
           print("non-intersecting rnm_border:", rnm_border)
-          resized_mol = [int(mol.shape[0] / 8), int(mol.shape[1] / 8)]
-          resized_rnm = [int(rnm.shape[0] / 8), int(rnm.shape[1] / 8)]
+          resized_mol = (int(mol.shape[0] / 8), int(mol.shape[1] / 8))
+          resized_rnm = (int(rnm.shape[0] / 8), int(rnm.shape[1] / 8))
           mol2 = cv2.resize(mol.copy(),resized_mol)
           rnm2 = cv2.resize(rnm.copy(),resized_rnm)
           # cv2.imshow("nonintersecting mol", mol2)
@@ -1046,7 +1047,8 @@ class AnalyzeMap():
           # make overlay map and add robot in current position.
           # in future, can add position of each move leading to this point
 
-          loc = hw_to_xy(self.robot_location.copy())
+          loc = tuple(hw_to_xy(self.robot_location.copy()))
+          print("loc: ",loc)
           # draw center of robot on map_overlay
           self.map_overlay = cv2.circle(self.map_overlay,loc,3,(255,0,0),-1)
           # draw rotated robot on map_overlay
@@ -1059,19 +1061,19 @@ class AnalyzeMap():
           startPt = None
           for loc in self.robot_location_history:
             if startPt is None:
-              startPt = [loc[1],loc[0]]
+              startPt = (loc[1],loc[0])
             else:
-              cv2.line(self.map_overlay,startPt,[loc[1],loc[0]],(0,0,255),3,cv2.LINE_AA)
-              startPt = [loc[1],loc[0]]
+              cv2.line(self.map_overlay,startPt,(loc[1],loc[0]),(0,0,255),3,cv2.LINE_AA)
+              startPt = (loc[1],loc[0])
 
-          rotated_robot_rectangle = cv2.circle(self.map_overlay,loc,3,(255,0,0),-1)
+          rotated_robot_rectangle = cv2.circle(self.map_overlay,tuple(loc),3,(255,0,0),-1)
           map_ovrlay_no_brdr = rm_borders(self.map_overlay)
           scale_factor = .4
           resized_map = [int(map_ovrlay_no_brdr.shape[1] * scale_factor),
                          int(map_ovrlay_no_brdr.shape[0] * scale_factor)]
-          map_ovrlay_no_brdr = cv2.resize(map_ovrlay_no_brdr, resized_map)
-          self.alset_state.record_map_overlay(map_ovrlay_no_brdr)
-          self.alset_state.record_location(self.robot_origin, self.robot_location_from_origin, self.robot_orientation)
+          map_ovrlay_no_brdr = cv2.resize(map_ovrlay_no_brdr, tuple(resized_map))
+          # self.alset_state.record_map_overlay(map_ovrlay_no_brdr)
+          # self.alset_state.record_location(self.robot_origin,self.robot_location_from_origin, self.robot_location, self.robot_orientation)
           if self.alset_state.get_frame_num() >= 400:
             # cv2.imshow("trimmed map_overlay", map_ovrlay_no_brdr)
             # cv2.waitKey(0)
@@ -1086,9 +1088,9 @@ class AnalyzeMap():
         # curr_image = cv2.imread(curr_img_pth)
         self.frame_num = self.alset_state.get_frame_num()
         curr_image,mean_diff,rl = self.cvu.adjust_light(curr_img_pth)
-        curr_image_KP = Keypoints(curr_image)
+        # curr_image_KP = Keypoints(curr_image)
         # ARD: TODO: fix frame_num hack
-        if self.alset_state.get_frame_num() > 213:
+        if self.alset_state.get_frame_num() > 213000:
           bird_eye_vw = self.get_birds_eye_view(curr_image, maskmode="CLOSED_GRIPPER")
           # cv2.imshow("Birds eye", bird_eye_vw )
           # cv2.waitKey(0)
@@ -1131,10 +1133,11 @@ class AnalyzeMap():
           self.robot_orientation = 0  # starting point in radians
           print("robot_location:",self.robot_location, map_height, map_width, self.border_buffer, robot_length)
           print("inital orientation: ", self.robot_orientation)
-          self.add_robot_to_overlay()
-          self.alset_state.record_map_origin(self.robot_origin)
+          map_ovrlay_no_brdr = self.add_robot_to_overlay()
+          # self.alset_state.record_map_origin(self.robot_origin)
           self.alset_state.record_map(self.map)
-          self.alset_state.record_location(self.robot_origin, self.robot_location_from_origin, self.robot_orientation)
+          self.alset_state.record_location(self.robot_origin,self.robot_location_from_origin, self.robot_location, self.robot_orientation)
+          self.alset_state.record_map_overlay(map_ovrlay_no_brdr)
 
           self.VIRTUAL_MAP_SIZE = self.border_buffer * 1 + map_height
           self.map_virtual_map_center = self.VIRTUAL_MAP_SIZE / 2
@@ -1211,7 +1214,7 @@ class AnalyzeMap():
           # move frame to global robot location and merge with current map`
           # try:
           if True:
-            print("orientation:", self.robot_orientation, self.robot_location_from_origin)
+            print("orientation:", self.robot_orientation, self.robot_location_from_origin, self.robot_location)
             self.map = self.merge_maps(self.map, rotated_new_map, self.robot_location_from_origin)
           # except:
           else:
@@ -1220,9 +1223,12 @@ class AnalyzeMap():
             cv2.waitKey(0)
           self.map_overlay = self.map.copy()
           overlay = self.add_robot_to_overlay()
+          self.alset_state.record_location(self.robot_origin,self.robot_location_from_origin, self.robot_location, self.robot_orientation)
+          self.alset_state.record_map_overlay(overlay)
+          self.alset_state.record_map(self.map)
           scale_factor = .1
-          resized_map = [int(overlay.shape[1] * scale_factor),
-                         int(overlay.shape[0] * scale_factor)]
+          resized_map = (int(overlay.shape[1] * scale_factor),
+                         int(overlay.shape[0] * scale_factor))
           overlay = cv2.resize(overlay, resized_map)
           armcnt = self.alset_state.get_arm_cnt()
           if action in ["LEFT", "RIGHT"]:
@@ -1231,7 +1237,6 @@ class AnalyzeMap():
           elif action in ["FORWARD", "REVERSE"]:
             if best_move is not None:
               alset_ratslam(curr_image, -best_move, 0, overlay, armcnt)
-
           return 
 
     def alset_ratslam_replay(self):

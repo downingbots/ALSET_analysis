@@ -71,6 +71,8 @@ class DSAnalysis():
         if res is None or not res2:
           break
         self.run_num += 1
+        self.alset_state.reset_restart()
+        self.alset_state.init_app_run(app_run_num=self.run_num, app_name=self.app_name, app_mode=self.app_type)
 
   # TODO: largely cloned from alset_dqn.py.  Should cleanup/parameterize a function callback.
   def parse_func_dataset(self, NN_name, app_mode="FUNC"):
@@ -114,21 +116,23 @@ class DSAnalysis():
                 continue
 
               else:
+                self.alset_state.increment_frame()
                 if not self.alset_state.restarting():
-                  self.alset_state.increment_frame()
                   self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state)
                   self.dispatch(action, state, next_state, done)
                 else:
+                  print("ratslam_replay")
                   self.analyze_map.alset_ratslam_replay()
                 print("PFD: dispatch:", action, reward, done, next_action)
               if next_action == "REWARD1":
+                # self.alset_state.increment_frame()
                 if not self.alset_state.restarting():
-                  self.alset_state.increment_frame()
                   self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state)
                   self.dispatch(action, state, next_state, done)
                 done = True  # end of func is done in this mode
                 print("PFD: completed REWARD phase2", self.get_frame_num(), next_action, reward, done)
               elif next_action in ["PENALTY1", "PENALTY2"]:
+                # self.alset_state.increment_frame()
                 if not self.alset_state.restarting():
                   self.dispatch(action, state, next_state, done)
                 done = True  # end of func is done in this mode
@@ -254,6 +258,8 @@ class DSAnalysis():
                   # the final compute reward sets done to True (see above)
                   self.dispatch(action, state, next_state, done)
                   print("PAD: dispatch:", self.get_frame_num(), action, reward, done)
+                else:
+                  self.alset_state.increment_frame()
               if next_action == "REWARD1" and func_flow_reward == "REWARD1":
                 if not self.alset_state.restarting():
                   print("PAD: FUNC_FLOW_REWARD4:", func_flow_reward)
@@ -262,12 +268,14 @@ class DSAnalysis():
                   done = True  
                   self.dispatch(action, state, next_state, done)
                   print("PAD: completed REWARD phase", self.get_frame_num(), next_action, reward, done)
+                else:
+                  self.alset_state.increment_frame()
                 if func_flow_nn_name is None:
                   done = True  
                 print("PAD: granted REWARD", self.get_frame_num(), next_action, reward, done)
               elif next_action in ["PENALTY1", "PENALTY2"]:
+                self.alset_state.increment_frame()
                 if not self.alset_state.restarting():
-                  self.alset_state.increment_frame()
                   self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
                   self.dispatch(action, state, next_state, done)
                 if func_flow_nn_name is None:

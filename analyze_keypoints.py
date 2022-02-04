@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 from operator import itemgetter, attrgetter
-import cv2 as cv
+import cv2 
 import numpy as np 
 import math
 from shapely.geometry import *
@@ -53,24 +53,31 @@ class Keypoints:
       self.cvu = CVAnalysisTools()
       self.feature_matches = []
       if kp_mode == "SIFT":
-        self.KP = cv.SIFT_create()
         try:
-          self.img= cv.cvtColor(self.img,cv.COLOR_BGR2GRAY)
+          self.KP = cv2.SIFT_create()
+        except:
+          try:
+            self.KP = cv2.features2d.SIFT_create()
+          except:
+            self.KP = cv2.xfeatures2d.SIFT_create()
+        try:
+          self.img= cv2.cvtColor(self.img,cv2.COLOR_BGR2GRAY)
         except:
           pass
         # cv.imshow("kp img:", self.img)
         # cv.waitKey(0)
       elif kp_mode == "ROOTSIFT":
         # initialize the SIFT feature extractor
-        self.KP = cv.SIFT_create()
-        self.img= cv.cvtColor(self.img,cv.COLOR_BGR2GRAY)
+        self.KP = cv2.SIFT_create()
+        # self.KP = cv2.xfeatures2d.SIFT_create()
+        self.img= cv2.cvtColor(self.img,cv2.COLOR_BGR2GRAY)
       elif kp_mode == "ORB":
-        self.KP = cv.ORB_create()         # Initiate SIFT detector
+        self.KP = cv2.ORB_create()         # Initiate SIFT detector
       elif kp_mode == "SURF":
         # SURF requires special installation and compilation b/c
         # SURF is not free.  Not used by default.
-        # self.KP = cv.SURF_create()         # Initiate SIFT detector
-        self.KP = cv.xfeatures2d.SURF_create(400)         # Initiate SIFT detector
+        # self.KP = cv2.SURF_create()         # Initiate SIFT detector
+        self.KP = cv2.xfeatures2d.SURF_create(400)         # Initiate SIFT detector
       elif kp_mode == "FEATURE":
         feature_params = dict( maxCorners = 100,
                qualityLevel = 0.02,
@@ -84,7 +91,7 @@ class Keypoints:
       # compute descriptors
       if kp_mode == "FEATURE":
         try:
-          self.img= cv.cvtColor(self.img,cv.COLOR_BGR2GRAY)
+          self.img= cv2.cvtColor(self.img,cv2.COLOR_BGR2GRAY)
         except:
           pass
         kps = cv2.goodFeaturesToTrack(self.img, mask = None, **feature_params)
@@ -319,7 +326,7 @@ class Keypoints:
       if self.descriptor is None or des2 is None:
         return [],[] 
       # BFMatcher with default params
-      bf = cv.BFMatcher()
+      bf = cv2.BFMatcher()
       matches = bf.knnMatch(self.descriptor,des2,k=2)
       # print("des info",self.descriptor, des2)
       print("len matches:", len(matches))
@@ -332,9 +339,9 @@ class Keypoints:
           d = m.distance/n.distance
           if m.distance < 0.75*n.distance:
               good.append(((m.queryIdx, m.trainIdx, m.distance), (n.queryIdx, n.trainIdx, n.distance), d))
-              print("good kp1:",self.keypoints[m.queryIdx].pt)
-              print("good kp2:",KP2.keypoints[n.trainIdx].pt)
-              print("--------")
+              # print("good kp1:",self.keypoints[m.queryIdx].pt)
+              # print("good kp2:",KP2.keypoints[n.trainIdx].pt)
+              # print("--------")
 
           else:
               notsogood.append(((m.queryIdx, m.trainIdx, m.distance), (n.queryIdx, n.trainIdx, n.distance), d))
@@ -394,14 +401,14 @@ class Keypoints:
     def drawKeypoints(self, color=(0,255,0)):
         kp_img = self.img.copy()
         if self.kp_mode == "SIFT":
-           return cv.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
+           return cv2.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
         elif self.kp_mode == "ORB":
-           return cv.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
+           return cv2.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
         elif self.kp_mode == "SURF":
-           return cv.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
-           # return cv.drawMatchesKnn(self.img,self.get_kp(),
+           return cv2.drawKeypoints(kp_img,self.keypoints,None,color=(0,255,0), flags=0)
+           # return cv2.drawMatchesKnn(self.img,self.get_kp(),
            #                        self.KP,self.get_kp(), good_matches, None,
-           #                        flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+           #                        flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
 
     def kp_match_stats(self, kp_matches, KP1=None, KP2=None):
         if len(kp_matches) >= 3:
@@ -580,8 +587,8 @@ class Keypoints:
       # direct deep copy of pixel feature locations
       f = KP.get_features()
       # centroid = self.cluster['centroid']
-      # return [cv.KeyPoint(x = (k.pt[0]-centroid.x), y = (k.pt[1]-centroid.y),
-      return [cv.KeyPoint(x = k.pt[0], y = k.pt[1],
+      # return [cv2.KeyPoint(x = (k.pt[0]-centroid.x), y = (k.pt[1]-centroid.y),
+      return [cv2.KeyPoint(x = k.pt[0], y = k.pt[1],
             _size = k.size, _angle = k.angle,
             _response = k.response, _octave = k.octave,
             _class_id = k.class_id) for k in f if k in kp_list], new_desc
@@ -713,7 +720,7 @@ class Keypoints:
       kp2 = KP2.get_kp()             
       des2 = KP2.get_descriptor()    
       # create BFMatcher object
-      bf = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
+      bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
       # Match descriptors.
       bf_matches = bf.match(self.get_des,des2)
       bf_matches = sorted(bf_matches, key = lambda x:x.distance)

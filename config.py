@@ -16,8 +16,25 @@ class Config():
                                        "LOWER_ARM_UP", "LOWER_ARM_DOWN"]
         self.arm_actions = self.arm_actions_no_wrist + ["WRIST_ROTATE_LEFT", "WRIST_ROTATE_RIGHT"]
         self.nn_disallowed_actions = ["REWARD1", "REWARD2", "PENALTY1", "PENALTY2", "WRIST_ROTATE_LEFT", "WRIST_ROTATE_RIGHT"]
-        # Note: Wrist Rotate is unreliable. Should just support horiz and vert positioning
-        # via a NN.
+
+        # Robot measurements for Arm Model in inches (relative ratio is the important part)
+        # Could store in generic format
+        # Note: Wrist Rotate is unreliable. Should just support horiz and vert positioning.
+        # Upper Arm is a wierd shape, but only care about joint-to-joint.
+        self.ROBOT_DIMENSIONS       = [7.5, 7.75]        # WIDTH/LENGTH
+        self.ROBOT_ARM_LENGTHS      = [5.124, 4.875, 3]   # UPPER/LOWER/CAMERA_TO_GRIPPER
+        self.ROBOT_ARM_ANGLE_LIMITS = [[(np.pi*23/32), -(np.pi*23/16)],   # upper arm
+                                       [(np.pi*11/16), -(np.pi*11/16)],   # lower arm
+                                       [-(np.pi*5/16), -(np.pi*5/16)]] # camera to gripper
+        self.ROBOT_ARM_INIT_ANGLES  = [(np.pi*12/16), -(np.pi*11/16), -(np.pi*5/16)] # PARKED
+        # fixed, 2-D
+        max_len = 0
+        for arm_len in self.ROBOT_ARM_LENGTHS:
+          max_len += arm_len
+        self.ROBOT_BASE = [[[0, 0], [0, -(5.25/2)]],   # arm joint elevation above base
+                           [[-(7.75 / 2), -(5.25/2)], [(7.75 / 2), -(5.25/2)]], # base
+                           [[-max_len, -5.25], [max_len, -5.25]]]       # ground
+
       ###################################
       if self.ALSET_MODEL == "X":
         self.IP_ADDR = "192.168.50.86"
@@ -83,26 +100,54 @@ class Config():
                             "RELOCATE",
                             "GOTO_CUBE",
                             # CUBE, CONTAINER, BALL, SIGN, x-SIGN, COLORED OBJECT, FIDUCIAL
-                            "PICK_UP_CUBE",
-                            "HIGH_SLOW_SEARCH_FOR_CUBE",
-                            "HIGH_SLOW_SEARCH_FOR_BOX_WITH_CUBE",
-                            "GOTO_BOX_WITH_CUBE",
-                            "DROP_CUBE_IN_BOX",
-                             # TABLETOP ATOMIC NNs FOR SUBSUMPTION
-                            "STAY_ON_TABLE",
-                            "MOVEMENT_CHECK",
+                            # "PICK_UP_CUBE",
+                            # "IF_EVENT"
+                            # "ELSE_EVENT
+                            # "LOOP"
+                            # "SEQUENCE"
+                            # "SELECT"
+                            #
+                            # "ANGLE_COMPARE" object 
+                            #    returns: CENTER, LEFT1, LEFT2, RIGHT1, RIGHT2
+                            # "ANGLE_UP_DOWN_COMPARE" object
+                            # or bounding box operatons
+                            # "HIGH_SLOW_SEARCH_FOR_CUBE",
+                            # "HIGH_SLOW_SEARCH_FOR_BOX_WITH_CUBE",
+                            # "GOTO_BOX_WITH_CUBE",
+                            # "DROP_CUBE_IN_BOX",
+                            # TABLETOP ATOMIC NNs FOR SUBSUMPTION
+                            # "STAY_ON_TABLE",
+                            # "MOVEMENT_CHECK",
                             ## JETBOT ATOMIC NNs 
                             # "LINE_FOLLOWING", "FACE_RECOGNITION", "OBJECT_FOLLOWING", 
                             # "GOTO_OBJECT o", (name and remember object)
                             # "GOTO_LOCATION l", (name and remember location)
+                            #                    (e.g. BETW_DOORWAY)
                             # "FORWARD/LEFT/RIGHT/etc #", 
                             # "WAIT_FOR_OBJECT o", (name and remember location)
                             # "SEARCH_FOR_OBJECT o", (name and remember location)
                             # "RECOGNIZE_OBJECT o", (put object on a rotating platform)
+                            # "FOR <event,object> IN LIST"
+                            # "EXPLORE"
+                            # "SUBSUMPTION_LEVEL" (avoid object)
+                            # "STOP_IN_FRONT_OF_OBJECT"
+                            # "STOP_FRONTLEFT_OF_OBJECT" x
+                            # "STOP_FRONTRIGHT_OF_OBJECT" x
+                            #     Used for recognizing sign
                             # "EXPLORE_AND_MAP", (name and remember location)
                             # "WAIT_FOR_MOVEMENT" (return object, if known)
+                            # "WAIT_FOR_OBJECT" (return object, if known)
+                            # "WAIT_FOR_EVENT" (return object, if known)
+                            #         (e.g., full load based on image)
+                            #         (learn automagically from training)
+                            # "LOCATION_EVENT
+                            # "SEE_OBJECT_EVENT
                             # "WAIT_TIME"
                             # "OBJECT_AVOIDANCE", 
+                            # "LEARN_OBJECT" - learn/avoid object on table.
+                            #     Drive around table without falling off. Take
+                            #     Pictures of object.
+                            # "AVOID_EDGES": tabletop or tape, its all the same.
                             # "CHARGE", 
                             ## OTHER ATOMIC NNs FOR SUBSUMPTION
                             # "GOTO_DARK_PLACE", "GOTO_BRIGHT_PLACE",
@@ -115,6 +160,7 @@ class Config():
                             # "FOLLOW_WALL"
                             # "FOLLOW_OBJECT"
                             # "FOLLOW_ROUTE" 
+                            # "FOLLOW_OBJECT" app
                             # "(UN)LOAD_PALLET"  # fork lift
                             # "(UN)STACK_PALLET"  # fork lift
                             # "(UN)STACK_OBJECT"  # fork lift, robot arm
@@ -133,7 +179,8 @@ class Config():
                             # "PUSH WITH GRIPPER"
                             # "PICK_AND_PLACE"   
                             # "DECLUTTER"   
-
+                            # "ID"
+                            # "BACKUP_BETWEEN"
                             # "DIG_TRENCH" "DIG_HOLE" "MAKE_PLATFORM" (dimensions)
                             # "MAKE_RAMP" "MAKE_PILE"
                             # "LOAD_CONVEYER"

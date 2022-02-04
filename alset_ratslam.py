@@ -46,13 +46,17 @@ from matplotlib import collections as mc
 import mpl_toolkits.mplot3d.axes3d as p3
 import math
 import ratslam 
+from config import *
 
 global ALSET_SLAM 
+global prm_road_map 
 ALSET_SLAM = ratslam.Ratslam()
+from scipy.spatial import KDTree
 
 
 # RUN A RATSLAM ITERATION ==================================
 def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
+        print("ratslam frame", vtrans, vrot)
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         slam = ALSET_SLAM
         if frame is not None and vtrans is None and vrot is None:
@@ -65,7 +69,8 @@ def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
         b, g, r = cv2.split(frame)
         rgb_frame = cv2.merge([r, g, b])
 
-        plot.clf()
+        # clear current figure
+        # plot.clf()
 
         # RAW IMAGE -------------------
         ax = plot.subplot(3, 2, 1)
@@ -114,7 +119,8 @@ def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
         # MAP OVERLAY IMAGE -------------------
         ax = plot.subplot(3, 2, 5)
         plot.title('MAP OVERLAY')
-        plot.imshow(overlay)
+        if overlay is not None:
+          plot.imshow(overlay)
         ax.get_xaxis().set_ticks([])
         ax.get_yaxis().set_ticks([])
 
@@ -123,6 +129,7 @@ def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
         plot.title('ARM POSITION')
         # arm_actions = ["UPPER_ARM_UP", "UPPER_ARM_DOWN", "LOWER_ARM_UP", "LOWER_ARM_DOWN"]
         
+        # ARD: TODO.  The arm representation is not correct, but purely for human visual debugging.
         UPPER_ARM_LENGTH = 1
         TEN_DEG = .174 - np.pi / 2
         HORIZ_DEG = math.pi * 4 / 3 - TEN_DEG
@@ -148,8 +155,9 @@ def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
         x2 = x1 + math.cos(angle2) * LOWER_ARM_LENGTH
         y2 = y1 + math.sin(angle2) * LOWER_ARM_LENGTH
         lower_arm = (x2,y2)
-        print("upper arm angle, x, y", angle1, x1, y1, armcnt[0], armcnt[1])
-        print("lower arm angle, x, y", angle2, x2, y2, armcnt[2], armcnt[3])
+        if armcnt is not None:
+          print("upper arm angle, x, y", angle1, x1, y1, armcnt[0], armcnt[1])
+          print("lower arm angle, x, y", angle2, x2, y2, armcnt[2], armcnt[3])
 
         lines = [[base, upper_arm], [upper_arm, lower_arm]]
         lc = mc.LineCollection(lines, color='black', linewidths=4)
@@ -171,3 +179,33 @@ def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
 
 def restart_alset_ratslam():
     ALSET_SLAM = ratslam.Ratslam()
+
+"""
+Derived from https://github.com/AtsushiSakai/PythonRobotics
+Run probabilistic road map planning
+:param start_x: start x position
+:param start_y: start y position
+:param goal_x: goal x position
+:param goal_y: goal y position
+:param obstacle_x_list: obstacle x positions (if init_map)
+:param obstacle_y_list: obstacle y positions (if init_map)
+:param init_map: boolean
+:return: planned x/y move
+"""
+def alset_ratslam_prm_plan(start_x, start_y, goal_x, goal_y, 
+                               obstacle_x_list=None, obstacle_y_list=None, init_map=False):
+    exp_x = [exp.x_m for exp in slam.experience_map.exps]
+    exp_y = [exp.y_m for exp in slam.experience_map.exps]
+    if init_map: 
+      # if slam map is precomputed and no new obstacles, don't recompute roadmap
+      cfg = Config()
+      robot_radius = np.sqrt(cfg.ROBOT_WIDTH**2 + cfg.ROBOT_LENGTH_W_TREAD**2) / 2
+      obstacle_kd_tree = KDTree(np.vstack((obstacle_x_list, obstacle_y_list)).T)
+      if prm_show_animation:
+        plt.plot(exp_x, exp_y, ".b")
+      # road_map is a global
+      prm_road_map = prm_generate_road_map(exp_x, exp_y, robot_radius, obstacle_kd_tree)
+    rx, ry = prm_dijkstra_planning( start_x, start_y, goal_x, goal_y, 
+                                    prm_road_map, exp_x, exp_y)
+    return rx, ry
+

@@ -1,0 +1,33 @@
+# https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data
+# 
+# $ python3 yolov5-6.0/train.py --img 640 --batch 16 --epochs 5 --data alset_yolov5.yaml --weights yolov5-6.0/yolov5n.pt
+
+path: ./apps/ALSET_YOLOV5_DATASET  # dataset root dir
+train: images/train/
+val: images/validate/
+
+# Classes
+nc: 36  # number of classes
+names: ["DRIVABLE_GROUND",
+       "ROBOT_LIGHT",
+       "BEST_CUBE_BB",
+       # 3-9
+       "CUBE", "CUBE_IN_ROBOT_LIGHT", "START_CUBE_GRAB", "GRIPPER_WITH_CUBE",
+       "BOX", "START_DROP_CUBE_IN_BOX", "DROP_CUBE_IN_BOX",
+       # 10-15
+       "LEFT_GRIPPER_OPEN", "RIGHT_GRIPPER_OPEN",
+       "LEFT_GRIPPER_CLOSED", "RIGHT_GRIPPER_CLOSED",
+       "LEFT_GRIPPER", "RIGHT_GRIPPER",
+       # 16-35
+       "LEFT_GRIPPER_O_0_0", "RIGHT_GRIPPER_O_0_0",
+       "LEFT_GRIPPER_O_1_0", "RIGHT_GRIPPER_O_1_0",
+       "LEFT_GRIPPER_O_2_0", "RIGHT_GRIPPER_O_2_0",
+       "LEFT_GRIPPER_O_3_0", "RIGHT_GRIPPER_O_3_0",
+       "LEFT_GRIPPER_O_4_0", "RIGHT_GRIPPER_O_4_0",
+       "LEFT_GRIPPER_O_5_0", "RIGHT_GRIPPER_O_5_0",
+       "LEFT_GRIPPER_O_6_0", "RIGHT_GRIPPER_O_6_0",
+       "LEFT_GRIPPER_O_7_0", "RIGHT_GRIPPER_O_7_0",
+       "LEFT_GRIPPER_O_8_0", "RIGHT_GRIPPER_O_8_0",
+       "LEFT_GRIPPER_O_9_0", "RIGHT_GRIPPER_O_9_0"
+       ]
+

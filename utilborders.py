@@ -79,7 +79,7 @@ def rotate_about_robot(image, angle, robot_location):
  
     # getRotationMatrix2D angle is in degrees!
     
-    rbt_loc = [robot_location[1], robot_location[0]]
+    rbt_loc = (robot_location[1], robot_location[0])
     M = cv2.getRotationMatrix2D(rbt_loc, radians_to_degrees(angle), 1)
     print("angle,M:", angle, M, robot_location, image.shape)
     out = cv2.warpAffine(image, M, (image.shape[0], image.shape[1]))
@@ -637,8 +637,9 @@ def image_in_border(border, image):
       return None
     print("minw, minh, maxw, maxh:", minw, minh, maxw, maxh)
     if minw is None:
-      cv2.imshow("Image with None minh/minw", image)
+      # cv2.imshow("Image with None minh/minw", image)
       # cv2.waitKey(0)
+      pass
     final_image = np.zeros((maxh-minh, maxw-minw), dtype="uint8")
     final_image[0:maxh-minh, 0:maxw-minw] = image[minh:maxh, minw:maxw]
     final_image_disp = final_image.copy()
@@ -880,8 +881,8 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False, padding_pct=None
     obj_maxx, obj_maxy = 0, 0
     orig_maxx, orig_minx, orig_maxy, orig_miny = get_min_max_borders(obj_bb)
     obj_contours = gray_img.copy()
-    cv2.drawContours(obj_contours, count, -1, (0,255,0), 3)
-    cv2.imshow("contours", obj_contours)
+    # cv2.drawContours(obj_contours, count, -1, (0,255,0), 3)
+    # cv2.imshow("contours", obj_contours)
     if len(process_pts) != 0:
       area = cv2.contourArea(approximations)
       # cv2.waitKey()
@@ -1035,7 +1036,7 @@ def get_contour_bb(obj_img, obj_bb, rl=None, limit_width=False, padding_pct=None
       
 def ensure_min_size_bb(bb):
     # The cube/object has to be a big % of the BB, otherwise bin_search doesn't 
-    # always work.
+    # always work.  Also, YOLO wants bb as small as possible. So, don't enforce borders.
     MIN_H_W = 20
     maxw, minw, maxh, minh = get_min_max_borders(bb)
     if maxw - minw < MIN_H_W or maxh - minh < MIN_H_W:
@@ -1044,7 +1045,7 @@ def ensure_min_size_bb(bb):
         wdif = int((MIN_H_W - (maxw - minw))/2)
       if MIN_H_W > maxh - minh:
         hdif = int((MIN_H_W - (maxh - minh))/2)
-      bb = make_bb(maxw+wdif, minw-wdif, maxh+hdif, minh-hdif)
+      bb = make_bb(min(img_sz(), maxw+wdif), max(0,minw-wdif), min(img_sz(),maxh+hdif), max(0,minh-hdif))
       print("ensure_min_size_bb", get_min_max_borders(bb))
     return bb
 

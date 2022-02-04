@@ -6,7 +6,7 @@ from analyze_keypoints import *
 import cv2 as cv2
 from math import sqrt
 import scipy.stats
-from kneebow.rotor import Rotor
+# from kneebow.rotor import Rotor
 import numpy as np
 import matplotlib.pyplot as plt
 from skimage.feature import *
