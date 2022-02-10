@@ -31,6 +31,9 @@ class Config():
         max_len = 0
         for arm_len in self.ROBOT_ARM_LENGTHS:
           max_len += arm_len
+#        self.ROBOT_BASE = [[[0, 5.25], [0, (5.25/2)]],   # arm joint elevation above base
+#                           [[-(7.75 / 2), (5.25/2)], [(7.75 / 2), (5.25/2)]], # base
+#                           [[-max_len, 0], [max_len, 0]]]       # ground
         self.ROBOT_BASE = [[[0, 0], [0, -(5.25/2)]],   # arm joint elevation above base
                            [[-(7.75 / 2), -(5.25/2)], [(7.75 / 2), -(5.25/2)]], # base
                            [[-max_len, -5.25], [max_len, -5.25]]]       # ground
