@@ -23,8 +23,9 @@ class Config():
         # Upper Arm is a wierd shape, but only care about joint-to-joint.
         self.ROBOT_DIMENSIONS       = [7.5, 7.75]        # WIDTH/LENGTH
         self.ROBOT_ARM_LENGTHS      = [5.124, 4.875, 3]   # UPPER/LOWER/CAMERA_TO_GRIPPER
-        self.ROBOT_ARM_ANGLE_LIMITS = [[(np.pi*23/32), -(np.pi*23/16)],   # upper arm
-                                       [(np.pi*11/16), -(np.pi*11/16)],   # lower arm
+        # on real robot, limits for angles 0 & 1 is 180degrees
+        self.ROBOT_ARM_ANGLE_LIMITS = [[(np.pi*24/32), -(np.pi*8/32)],   # upper arm
+                                       [(np.pi*5/16), -(np.pi*11/16)],   # lower arm
                                        [-(np.pi*5/16), -(np.pi*5/16)]] # camera to gripper
         self.ROBOT_ARM_INIT_ANGLES  = [(np.pi*12/16), -(np.pi*11/16), -(np.pi*5/16)] # PARKED
         # fixed, 2-D
@@ -644,7 +645,7 @@ class Config():
       self.MIN_UNMOVED_PIX_COUNT = 4
       self.VIRTUAL_MAP_SIZE = 10000
       self.ENABLED_ANALYSIS = ["METRICS", "LINES", "KEYPOINTS"]
-      self.INFINITE = 1000000000000000000000
+      self.INFINITE = 100000000000000000
       self.RADIAN_THRESH = 0.01
       self.MSE_THRESH    = 140
       self.SSIM_THRESH   = 0.5
