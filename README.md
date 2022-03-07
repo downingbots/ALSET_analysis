@@ -26,7 +26,7 @@ The software is written in python.  So far, the prototype software integrates:
  - simple pretrained NNs (e.g., Alexnet) that can be tuned to provide jetbot-like functionality such as line following, table-top obstacle avoidance, facial recognition, etc.)
  - ddqn reinforcement learning
  
-The software and hardware are still evolving. The training of complex behaviors requires way too many runs (I feel sorry for the PhD students doing reinforcement learning!).  I am trying to set up support so that generic OpenCV-based algorithms can limp through a more controled environment until the robot can self-train YOLO object recognition (of an object to pick up, of a location, of a container drop-off, of a sign, etc.). Next, yolo-based identification will automatically replace any opencv algorithms to drive more generic functionality (search for object, goto object, pick-up object, goto destination, dropoff object, etc.) The yolo-centric functionality is then used to gather more data for even higher-level NN functionality and end-to-end reinforcement learning on real (non-simulated) robots.
+The software and hardware are still evolving. The training of complex behaviors requires way too many runs (I feel sorry for the PhD students doing reinforcement learning!).  I am trying to set up support so that generic OpenCV-based algorithms can limp through a more controlled environment until the robot can self-train YOLO object recognition (of an object to pick up, of a location, of a container drop-off, of a sign, etc.). Next, yolo-based identification will automatically replace any opencv algorithms to drive more generic functionality (search for object, goto object, pick-up object, goto destination, dropoff object, etc.) The yolo-centric functionality is then used to gather more data for even higher-level NN functionality and end-to-end reinforcement learning on real (non-simulated) robots.
 
 This is a tough problem to crack. Approaches like open-cv programming are way too brittle and limited, while reinforcement learning requires an obscene amount of data for training. The goal here is to take advantage of the strengths of each approach to iteratively build up more complex funcionality. A side-goal is to hugely reduce the cost of entry.  For example, I started with an RC robot with an arm on clearance ($20 each!), added a $100 Jetson and a pi-camera, a 500 Gig SD card, and an inexpensive I/O control board, and I've got an amazing robot that has the functionality of a robot that costs thousands.  Essentially the same setup was done to automate an incredible $130 RC Excavator. The integrated software system will not require anything close to the complexity to understand/use/maintain ROS.
 
@@ -42,6 +42,8 @@ In the ALSET_analysis repository, you find human-programmed functionality (as op
 
 
 Thanks,
+
 Alan 
+
 DowningBots at gmail.com
 
