@@ -4,7 +4,6 @@
 
 # ALSET ANALYSIS for ALSET Autonomous Vehicles 
 ## Inexpensive Autonomous RC Vehicles with Manipulators
-Hi Martin,
 
 I think machine vision is the key to robotics. After years of working on large ROS-based robots (since C-Turtle days), I've changed my focus to the supporting following:
 
@@ -32,12 +31,14 @@ The software and hardware are still evolving. The training of complex behaviors 
 This is a tough problem to crack. Approaches like open-cv programming are way too brittle and limited, while reinforcement learning requires an obscene amount of data for training. The goal here is to take advantage of the strengths of each approach to iteratively build up more complex funcionality. A side-goal is to hugely reduce the cost of entry.  For example, I started with an RC robot with an arm on clearance ($20 each!), added a $100 Jetson and a pi-camera, a 500 Gig SD card, and an inexpensive I/O control board, and I've got an amazing robot that has the functionality of a robot that costs thousands.  Essentially the same setup was done to automate an incredible $130 RC Excavator. The integrated software system will not require anything close to the complexity to understand/use/maintain ROS.
 
 This is very much a work-in-progress.  More details of the project can be found at:
+
 https://github.com/downingbots/ALSET
+
 https://github.com/downingbots/ALSET_analysis
 
 The first repository provides the runtime functionality. Run the Jetbot-like functions via teleop to get the dataset to train and then run a NN.  In theory, you can gather data and run DDQN end-to-end reinforcement learning for more advanced functionality.  In reality, I don't believe anybody would have the patience to gather a big enough training set to get things to work.  That's where the ALSET_analysis repository kicks in.
 
-In the ALSET_analysis repository, you find human-programmed programs (as opposed to NNs) that could be used with a single monocular camera to analyze runs done by the software in the ALSET repository. The goal is to do a quick demo of the desired functionality in a more controlled environment and have the robot take over to gather more and more data as discussed above. Hopefully, we can build more and more functionality over time that can transfer across different robots.  This project is a work in progress, and borders upon being a research project.
+In the ALSET_analysis repository, you find human-programmed functionality (as opposed to NNs) that could be used with a single monocular camera to analyze runs done by the software in the ALSET repository. The goal is to do a quick demo of the desired functionality in a more controlled environment and have the robot take over to gather more and more data as discussed above. Hopefully, we can build more and more functionality over time that can transfer across different robots.  This project is a work in progress, and borders upon being a research project.
 
 
 Thanks,
