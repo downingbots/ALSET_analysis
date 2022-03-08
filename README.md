@@ -13,6 +13,8 @@ I think machine vision is the key to robotics. After years of working on large R
 
 To accomplish #1, low-end RC toys and vehicles like robot toys with usable arms and high-quality construction RC vehicles like excavators, dump-trucks, fork-lifts, working fire engines can be easily retrofitted to become automated.  The RC vehicles essentially have a camera and a jetson and a huge SD card.  There's an interface between the Jetson and the RC control to enable automated control. In addition, you can use your own joystick to provide initial demonstrations and for overriding commands or assigning rewards / penalties.  The only sensor is a camera.  There's no odometry other than the visual odometry.
 
+Envision an RC excavator automatically digging gravel from a child's sandpit and loading an robot RC dump truck. The dump truck drives away when the payload is full to go dump the gravel into another sandpit.  Meanwhile an robot RC bulldozer is pushing more gravel to the RC excavator.  Such a "construction site" could be built at a very low cost, be extremely educational, fun, and possibly contribute to the state-of-the-art of machine vision.
+
 The software is written in python.  So far, the prototype software integrates:
  - visual odometry and mapping
  - rat-slam (based purely upon monocular camera)
