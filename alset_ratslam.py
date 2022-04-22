@@ -206,6 +206,7 @@ Run probabilistic road map planning
 """
 def alset_ratslam_prm_plan(start_x, start_y, goal_x, goal_y, 
                                obstacle_x_list=None, obstacle_y_list=None, init_map=False):
+    slam = ALSET_SLAM
     exp_x = [exp.x_m for exp in slam.experience_map.exps]
     exp_y = [exp.y_m for exp in slam.experience_map.exps]
     if init_map: 
