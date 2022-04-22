@@ -1,9 +1,9 @@
 # https://github.com/renatopp/ratslam-python
-# Please copy the contents of:
+# Please make a copy of the following directory and its contents:
 #   https://github.com/renatopp/ratslam-python/tree/master/ratslam
-# to your local directory.
+# into your local directory.
 #
-# Note: ported to Python3 with slight modifications
+# Note: ported this "main.py" file to Python3 with slight modifications for ALSET
 #
 # =============================================================================
 # Federal University of Rio Grande do Sul (UFRGS)
