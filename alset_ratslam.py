@@ -1,4 +1,8 @@
 # https://github.com/renatopp/ratslam-python
+# Please copy the contents of:
+#   https://github.com/renatopp/ratslam-python/tree/master/ratslam
+# to your local directory.
+#
 # Note: ported to Python3 with slight modifications
 #
 # =============================================================================
