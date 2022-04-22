@@ -128,12 +128,17 @@ def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
         ax.get_xaxis().set_ticks([])
         ax.get_yaxis().set_ticks([])
 
+        ########################
+        # ARD: IGNORE THIS SECTION.  
+        # TODO.  The arm representation is not correct. In the process of
+        # being replaced by arm_nav.py.
+        #
         # ARM VALUES -------------------
         ax = plot.subplot(3, 2, 6)
         plot.title('ARM POSITION')
         # arm_actions = ["UPPER_ARM_UP", "UPPER_ARM_DOWN", "LOWER_ARM_UP", "LOWER_ARM_DOWN"]
         
-        # ARD: TODO.  The arm representation is not correct, but purely for human visual debugging.
+        #
         UPPER_ARM_LENGTH = 1
         TEN_DEG = .174 - np.pi / 2
         HORIZ_DEG = math.pi * 4 / 3 - TEN_DEG
@@ -168,6 +173,9 @@ def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
         ax.add_collection(lc)
         ax.autoscale()
         ax.margins(0.1)
+        ########################
+        # ARD: END IGNORED SECTION.  
+        ########################
 
         # -----------------------------
 
