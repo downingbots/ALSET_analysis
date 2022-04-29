@@ -1,6 +1,9 @@
 #!/usr/bin/env python
+from alset_state import *
 from matplotlib import pyplot as plt
 import cv2
+import STEGO.src
+from alset_stego import *
 import numpy as np
 import copy
 from math import sin, cos, pi, sqrt
@@ -337,35 +340,33 @@ def is_same_line(line1, line2):
 def is_broken_line(line1, line2):
     def det(a, b):
         return a[0] * b[1] - a[1] * b[0]
+    def get_dist(x1,y1, x2, y2):
+        return sqrt((x2-x1)**2 + (y2-y1)**2)
 
     if not is_parallel(line1, line2):
       return None
     if line_intersection(line1, line2) is not None:
       return None
-    pts = []
-    pts.append([line1[0][0], line1[0][1]])
-    pts.append([line1[0][2], line1[0][3]])
-    pts.append([line2[0][0], line2[0][1]])
-    pts.append([line2[0][2], line2[0][3]])
-    if not (is_parallel(line1, [[pts[0][0],pts[0][1], pts[2][0],pts[2][1]]]) 
-       and is_parallel(line2, [[pts[1][0],pts[1][1], pts[3][0],pts[3][1]]])):
-      return None
 
-    if max(line1[0][0], line1[0][2]) <= min(line2[0][0], line2[0][2]):
-      break_x = [max(line1[0][0], line1[0][2]), min(line2[0][0], line2[0][2])]
-    elif min(line1[0][0], line1[0][2]) >= max(line2[0][0], line2[0][2]):
-      break_x = [max(line2[0][0],line2[0][2]), min(line1[0][0], line1[0][2])] 
-    else:
-      return None
-    if max(line1[0][1], line1[0][3]) <= min(line2[0][1], line2[0][3]):
-      break_y = [max(line1[0][1], line1[0][3]), min(line2[0][1], line2[0][3])]
-    elif min(line1[0][1], line1[0][3]) >= max(line2[0][1], line2[0][3]):
-      break_y = [max(line2[0][1],line2[0][3]), min(line1[0][1], line1[0][3])] 
-    else:
-      return None
+    dist0 = get_dist(line1[0][0], line1[0][1], line2[0][0], line1[0][1])
+    dist1 = get_dist(line1[0][0], line1[0][1], line2[0][2], line1[0][3])
+    dist2 = get_dist(line1[0][2], line1[0][3], line2[0][0], line1[0][1])
+    dist3 = get_dist(line1[0][2], line1[0][3], line2[0][2], line1[0][3])
 
-    print("broken line: line1, line2", line1, line2, (break_x[0], break_y[0], break_x[1], break_y[1]))
-    return (break_x[0], break_y[0], break_x[1], break_y[1])
+    extended_line = None
+    if dist0 == max(dist0,dist1,dist2,dist3):
+      extended_line = [[line1[0][0], line1[0][1], line2[0][0], line1[0][1]]]
+    elif dist1 == max(dist0,dist1,dist2,dist3):
+      extended_line = [[line1[0][0], line1[0][1], line2[0][2], line1[0][3]]]
+    elif dist2 == max(dist0,dist1,dist2,dist3):
+      extended_line = [[line1[0][2], line1[0][3], line2[0][0], line1[0][1]]]
+    elif dist3 == max(dist0,dist1,dist2,dist3):
+      extended_line = [[line1[0][2], line1[0][3], line2[0][2], line1[0][3]]]
+   
+    if not (is_parallel(line1, extended_line) and is_parallel(line2, extended_line)):
+      return None
+    # print("broken line: ", line1, line2, extended_line)
+    return extended_line
 
 def same_line_score(line1, line2, delta=[0,0]):
     # smaller is better / more likely to be exact same line
@@ -398,57 +399,100 @@ def same_line_score(line1, line2, delta=[0,0]):
 def is_parallel(line1, line2):
     angle1 = np.arctan2((line1[0][0]-line1[0][2]), (line1[0][1]-line1[0][3]))
     angle2 = np.arctan2((line2[0][0]-line2[0][2]), (line2[0][1]-line2[0][3]))
-    allowed_delta = .05
+    allowed_delta = .1
     if abs(angle1-angle2) <= allowed_delta:
+      # print("is_parallel line1, line2", line1, line2, angle1, angle2)
+      return True
+    if abs(np.pi-abs(angle1-angle2)) <= allowed_delta:
+      # note: .01 and 3.14 should be considered parallel
       # print("is_parallel line1, line2", line1, line2, angle1, angle2)
       return True
     return False
 
 
-def parallel_dist(line1, line2):
+# mean disp, angle, linlen: False None None 0.048744851309931586 41.048751503547585 [[203, 182, 205, 223]] 1
+# mean disp, angle, linlen: False None None 0.04874585130993159 41.048751503547585 [[204, 182, 206, 223]] 1
+
+def parallel_dist(line1, line2, dbg=False):
     if not is_parallel(line1, line2):
       return None
     # line1, line2 [[151 138 223 149]] [[ 38  76 139  96]]
 
     # y = mx + c
-    pts = [(line1[0][0], line1[0][2]), (line1[0][1], line1[0][3])]
+    # pts = [(line1[0][0], line1[0][2]), (line1[0][1], line1[0][3])]
+    pts = [(line1[0][0], line1[0][1]), (line1[0][2], line1[0][3])]
     x_coords, y_coords = zip(*pts)
     A = np.vstack([x_coords,np.ones(len(x_coords))]).T
     l1_m, l1_c = np.linalg.lstsq(A, y_coords)[0]
+    if dbg:
+      print("x,y,m,c", x_coords, y_coords, l1_m, l1_c)
 
-    pts = [(line2[0][0], line2[0][2]), (line2[0][1], line2[0][3])]
+    pts = [(line2[0][0], line2[0][1]), (line2[0][2], line2[0][3])]
     x_coords, y_coords = zip(*pts)
     A = np.vstack([x_coords,np.ones(len(x_coords))]).T
     l2_m, l2_c = np.linalg.lstsq(A, y_coords)[0]
+    if dbg:
+      print("x,y,m,c", x_coords, y_coords, l2_m, l2_c)
 
     # coefficients = np.polyfit(x_val, y_val, 1)
-    if ((line1[0][0] > line2[0][0] > line1[0][2]) or
-        (line1[0][0] < line2[0][0] < line1[0][2])):
+    # Goal: set vert(y) the same on both lines, compute horiz(x).
+    # with a vertical line, displacement will be very hard to compute
+    # unless same end-points are displaced.
+    if ((line1[0][0] >= line2[0][0] >= line1[0][2]) or
+        (line1[0][0] <= line2[0][0] <= line1[0][2])):
       x1 = line2[0][0]
-      y1 = l1_m * x1 + l1_c
-      y2 = line2[0][1]
+      y1 = line2[0][1]
+      y2 = y1
       x2 = (y2 - l1_c) / l1_m
-    elif ((line1[0][0] > line2[0][2] > line1[0][2]) or
-          (line1[0][0] < line2[0][2] < line1[0][2])):
+      # y2 = l1_m * x1 + l1_c
+      # x2 = (y1 - l2_c) / l2_m
+    elif ((line1[0][0] >= line2[0][2] >= line1[0][2]) or
+          (line1[0][0] <= line2[0][2] <= line1[0][2])):
       x1 = line2[0][2]
-      y1 = l1_m * x1 + l1_c
-      y2 = line2[0][3]
+      y1 = line2[0][3]
+      y2 = y1
       x2 = (y2 - l1_c) / l1_m
-    elif ((line2[0][0] > line1[0][0] > line2[0][2]) or
-          (line2[0][0] < line1[0][0] < line2[0][2])):
+      # y2 = l1_m * x1 + l1_c
+      # x2 = (y1 - l2_c) / l2_m
+    elif ((line2[0][0] >= line1[0][0] >= line2[0][2]) or
+          (line2[0][0] <= line1[0][0] <= line2[0][2])):
       x1 = line1[0][0]
-      y1 = l2_m * x1 + l2_c
-      y2 = line1[0][1]
-      x2 = (y2 - l1_c) / l1_m
-    elif ((line2[0][0] > line1[0][2] > line2[0][2]) or
-          (line2[0][0] < line1[0][2] < line2[0][2])):
+      y1 = line1[0][1]
+      y2 = y1
+      x2 = (y2 - l2_c) / l2_m
+    elif ((line2[0][0] >= line1[0][2] >= line2[0][2]) or
+          (line2[0][0] <= line1[0][2] <= line2[0][2])):
       x1 = line1[0][2]
-      y1 = l2_m * x1 + l2_c
-      y2 = line1[0][3]
+      y1 = line1[0][3]
+      y2 = y1
+      x2 = (y2 - l2_c) / l2_m
+    elif ((line1[0][1] >= line2[0][1] >= line1[0][3]) or
+          (line1[0][1] <= line2[0][1] <= line1[0][3])):
+      x1 = line2[0][0]
+      y1 = line2[0][1]
+      y2 = y1
       x2 = (y2 - l1_c) / l1_m
+    elif ((line1[0][1] >= line2[0][3] >= line1[0][3]) or
+          (line1[0][1] <= line2[0][3] <= line1[0][3])):
+      y1 = line2[0][3]
+      x1 = line2[0][2]
+      y2 = y1
+      x2 = (y2 - l1_c) / l1_m
+    elif ((line2[0][1] >= line1[0][1] >= line2[0][3]) or
+          (line2[0][1] <= line1[0][1] <= line2[0][3])):
+      y1 = line1[0][1]
+      x1 = line1[0][0]
+      y2 = y1
+      x2 = (y2 - l2_c) / l2_m
+    elif ((line2[0][1] >= line1[0][3] >= line2[0][3]) or
+          (line2[0][1] <= line1[0][3] <= line2[0][3])):
+      y1 = line1[0][3]
+      x1 = line1[0][2]
+      y2 = y1
+      x2 = (y2 - l2_c) / l2_m
     else:
       return None
-    print("parallel_dist", (y1-y2))
+    # print("parallel_dist", (x1-x2),(y1-y2))
     return x1-x2, y1 - y2
 
 def get_scale():
@@ -567,7 +611,7 @@ def watershed2(img):
     # cv2.waitKey(0)
 
     accuracy_factor = .1
-    print("len contours",  len(contours))
+    # print("len contours",  len(contours))
     for c in contours:
         obj_contours = gray.copy()
         if len(contours) > 1:
@@ -1304,7 +1348,7 @@ def analyze_moved_lines(moved_lines, best_moved_lines, num_ds, num_imgs, gripper
       # find_line_intersects(
       color = (random.randint(0, 255),random.randint(0, 255),random.randint(0, 255))
 
-      is_gripper
+      # is_gripper
 
       return
 
@@ -1527,7 +1571,7 @@ def contour_gripper(gripper_img):
       return points
 
 
-def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
+def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img, img_paths):
     angle_sd = SortedDict()
     box_line_intersections = []
     world_lines = []
@@ -1542,9 +1586,14 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
     gripper_lines = get_hough_lines(gripper_img)
     gripper_lines2 = get_hough_lines(gripper_img)
     gripper_lines_image = np.zeros_like(gripper_img)
+    min_gripper_y = 100000000
     for line in gripper_lines2:
       for x1,y1,x2,y2 in line:
         cv2.line(gripper_lines_image,(x1,y1),(x2,y2),(255,0,0),5)
+        for y in [y1,y2]:
+          if y < min_gripper_y:
+            MIN_GRIPPER_Y = y
+
     cv2.imshow("gripper lines", gripper_lines_image)
     unknown_lines = []
     same_frame_parallel = []
@@ -1571,6 +1620,11 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
     # get_displacement():
 
     action_cnt = -1
+    persist_line_stats = []
+    persist_line = []
+    persist_line_most_recent = [] # [[ds_num, img_num]]
+    persist_line_min_max_ds_img = []
+    persist_line_counter = []
     for ds_num, ds in enumerate(dataset):
       for pass_num in range(num_passes):
         num_imgs = len(box_lines[ds_num])
@@ -1672,7 +1726,7 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
                       found = True
                       break
                   if not found:
-                    print("broken_line", ds_num, img_num)
+                    # print("broken_line", ds_num, img_num)
                     broken_lines[ds_num][img_num].append([copy.deepcopy(u_line), copy.deepcopy(h_line), broken_line])
               min_dist = 100000000
               best_p_line = None
@@ -1711,16 +1765,18 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
               print("##################")
               print("Image Sorted Lines")
               print("##################")
-              for ds_num, ds in enumerate(dataset):
-                for img_num in range(num_imgs):
-                  hough_lines = box_lines[ds_num][img_num]
+              for is_ds_num, ds in enumerate(dataset):
+                for is_img_num in range(num_imgs):
+                  hough_lines = box_lines[is_ds_num][is_img_num]
                   if hough_lines is None:
-                    print("No hough_lines for", ds_num, img_num)
+                    print("No hough_lines for", is_ds_num, is_img_num)
                     continue
                   else:
                     for hl_num, h_line in enumerate(hough_lines):
-                      print((ds_num, img_num, hl_num), h_line)
+                      print((is_ds_num, is_img_num, hl_num), h_line)
 
+          if pass_num == 2:
+            print("pass_num", pass_num)
       
             ###################
             # Angle Sorted Dict
@@ -1730,9 +1786,9 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
               print("No hough_lines for", ds_num, img_num)
               continue
             else:
-              print("##################")
-              print("Angle Sorted Lines")
-              print("##################")
+              # print("##################")
+              # print("Angle Sorted Lines")
+              # print("##################")
               for hl_num, h_line in enumerate(hough_lines):
                 angle = np.arctan2((h_line[0][0]-h_line[0][2]), (h_line[0][1]-h_line[0][3]))
                 if angle <= 0:
@@ -1761,7 +1817,7 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
             # Intersections within same image
             if hough_lines is None:
               print("No hough_lines for", ds_num, img_num)
-              continue
+              # continue
             else:
               for hl_num, h_line in enumerate(hough_lines):
                 for hl_num2, h_line2 in enumerate(hough_lines):
@@ -1781,10 +1837,10 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
             ############
             if img_num == num_imgs-1:
               num_lines = 0
-              persist_line = []
-              persist_line_most_recent = [] # [[ds_num, img_num]]
+              # persist_line = []
+              # persist_line_most_recent = [] # [[ds_num, img_num]]
               # persist_line[lineno] = {(ds_num, img_num), [key1, key2]}
-              # new persist_line[lineno][(d,i for d in range(num_ds) for i in range(num_img))] = []
+              # new persist_line[lineno][(d,i for d in range(num_ds) for i in range(num_imgs))] = []
               persist_line_3d = []  
               # 3d_persist_line[line_num] = [composite_3D_line]
               max_angle_dif = .1   # any bigger, can be purged from cache
@@ -1794,88 +1850,269 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
               a_cnt = 0
               for angle, item in akv:
                 a_cnt += 1
-                print(a_cnt, "angle:", angle, len(persist_line))
+                if a_cnt % 50 == 0 or len(persist_line) < 7:
+                  print(a_cnt, "angle:", angle, len(persist_line))
+                # angle, pl_angle => too big to be considered parallel even though same line.... 
                 ds_num, img_num, a_line = item
                 min_dist = 1000000000000
+                best_pl_num = -1
                 best_pl_line = -1
                 best_pl_ds_num = -1
                 best_pl_img_num = -1
+                max_counter = -1
+                max_counter_num = -1
                 # instead of going through each persist line,
                 # go to persist line with angles above/below curr angle.
                 for pl_num, pl in enumerate(persist_line):
-                  pl_ds_num, pl_img_num = persist_line_most_recent[pl_num]
-                  # print("pl ds,img num:", pl_ds_num, pl_img_num)
-                  pl_angle_lst = persist_line[pl_num][(pl_ds_num, pl_img_num)]
-                  # print("pl_angle_lst:", pl_angle_lst)
+                  mr_pl_ds_num, mr_pl_img_num = persist_line_most_recent[pl_num]
+                  pl_angle_lst = persist_line[pl_num][(mr_pl_ds_num, mr_pl_img_num)]
+                  if len(persist_line) < 7:
+                    print("pl ds,img num:", mr_pl_ds_num, mr_pl_img_num)
+                    # print("pl_angle_lst:", pl_angle_lst)
                   for pl_angle in pl_angle_lst:
-                    # print("pl_angle:", pl_angle)
                     pl_item = angle_sd[pl_angle]
-                    # angle_sd[angle] = (ds_num, img_num, h_line)
-                    # print("pl_item:", pl_item)
                     pl_ds_num, pl_img_num, pl_line = pl_item
-                    # print("pl_line:", pl_line, a_line)
                     dist = parallel_dist(pl_line, a_line)
-                    if dist is not None and min_dist > sqrt(abs(dist[0])+abs(dist[1])):
-                      min_dist = sqrt(abs(dist[0])+abs(dist[1]))
-                      best_pl_line = pl_num
-                      best_pl_ds_num = pl_ds_num
-                      best_pl_img_num = pl_img_num
-                if ds_num == best_pl_ds_num and min_dist < abs(img_num - best_pl_img_num) * min_dist_allowed:
+                    # if len(persist_line) < 7:
+                    if True:
+                      cont = True
+                      for i in range(4):
+                        if abs(pl_line[0][i] - a_line[0][i]) > 4:
+                         cont = False
+                      cont = False
+                      if cont:
+                        dist = parallel_dist(pl_line, a_line, True)
+                        print("pl_angle, item:", pl_angle, pl_item)
+                        print("pl_line:", pl_line, a_line)
+                        print("pl_dist:", dist)
+                        if dist is not None:
+                          print(min_dist,sqrt(dist[0]**2+dist[1]**2))
+                    if dist is None:
+                      # lines may be broken continutions of each other 
+                      extended_line = is_broken_line(pl_line, a_line)
+                      if extended_line is not None:
+                        dist = parallel_dist(pl_line, extended_line)
+                        if len(persist_line) < 7:
+                          print("dist:", dist, pl_line, extended_line)
+                    if dist is not None and min_dist > sqrt(dist[0]**2+dist[1]**2):
+                      min_dist = sqrt(dist[0]**2+dist[1]**2)
+                      best_pl_num = pl_num
+                      best_pl_ds_num = mr_pl_ds_num
+                      best_pl_img_num = mr_pl_img_num
+                # if ds_num == best_pl_ds_num: 
+                #   print("min_dist", min_dist, abs(img_num - best_pl_img_num), best_pl_img_num)
+                if ds_num == best_pl_ds_num and min_dist < abs(img_num - best_pl_img_num+1) * min_dist_allowed:
                   # same line
-                  persist_line[pl_num][(ds_num, img_num)].append(angle)
-                  persist_line_most_recent[pl_num] = [ds_num, img_num]
+                  # print("p_l",persist_line[best_pl_num])
+                  # print("p_l2", persist_line[best_pl_num][(best_pl_ds_num, best_pl_img_num)])
+                  try:
+                    lst = persist_line[best_pl_num][(ds_num, img_num)]
+                    lst.append(angle)
+                  except:
+                    persist_line[best_pl_num][(ds_num, img_num)] = []
+                    persist_line[best_pl_num][(ds_num, img_num)].append(angle)
+                  persist_line_most_recent[best_pl_num] = [ds_num, img_num]
                 else:
                   persist_line_most_recent.append([ds_num, img_num])
+                  if len(persist_line) < 7:
+                      print("best pl, ds, img:", best_pl_num, best_pl_ds_num, best_pl_img_num)
                   persist_line.append({})
                   persist_line[-1][(ds_num, img_num)] = []
                   persist_line[-1][(ds_num, img_num)].append(angle)
-              persist_line_stats = []
+              # persist_line_stats = []
+              mean_gripper_line = []
+              mean_gripper_line1 = []
+              mean_gripper_line2 = []
+              # persist_line_counter = []
+              # persist_line_min_max_ds_img = []
+              non_gripper = []
+              none_disp = []
+              big_count = []
               for pl_num, pl in enumerate(persist_line):
                 print("PERSISTENT LINE #", pl_num)
+                persist_line_stats.append(None)
                 counter = 0
                 running_sum_x = 0
                 running_sum_y = 0
                 running_sum2_x = 0
                 running_sum2_y = 0
+                got_disp = False
+                dispcnt = 0
+                running_sum_counter = 0
+                running_sum2_counter = 0
+                running_sum_disp_x = 0
+                running_sum_disp_y = 0
+                running_sum2_disp_x = 0
+                running_sum2_disp_y = 0
                 running_line_length = 0
+                running_line = [0,0,0,0]
                 running_angle = 0
+                # for ds = 0, get max/min img#
+                persist_line_min_max_ds_img.append([1000000, -1])
                 a_ds_num = -1
                 a_img_num = -1
                 a_line = []
                 for pl_ds_num in range(num_ds):
-                  for pl_img_num in range(num_img):
+                  if pl_ds_num > 0:
+                    # TODO: num_imgs depends on ds_num; get ds_num 0 to work first.
+                    print("pl_ds_num > 0", pl_ds_num)
+                    break
+                  for pl_img_num in range(num_imgs):
                     try:
                       angle_list = pl[(pl_ds_num, pl_img_num)]
                     except:
                       continue
+                    # first and last line appearance
+                    if pl_img_num  < persist_line_min_max_ds_img[pl_num][0]:
+                      persist_line_min_max_ds_img[pl_num][0] = pl_img_num
+                    if pl_img_num  > persist_line_min_max_ds_img[pl_num][1]:
+                      persist_line_min_max_ds_img[pl_num][1] = pl_img_num
+
                     for pl_angle in angle_list:
                       prev_a_line = copy.deepcopy(a_line)
                       prev_ds_num = a_ds_num
                       prev_img_num = a_img_num
-                      a_ds_num, a_img_num, a_line = akv[pl_angle]
-                      if prev_ds_num == -1:
-                        continue
-                      disp = parallel_dist(prev_a_line, a_line)
+                      asd_item = angle_sd[pl_angle]
+                      a_ds_num, a_img_num, a_line = asd_item
+                      if prev_ds_num != -1:
+                        disp = parallel_dist(prev_a_line, a_line)
+                        if disp is not None:
+                          got_disp = True
+                          running_sum_disp_x += disp[0]
+                          running_sum_disp_y += disp[1]
+                          running_sum2_disp_x += disp[0] * disp[0]
+                          running_sum2_disp_y += disp[1] * disp[1]
+                          dispcnt += 1
                       running_sum_x += (a_line[0][0] + a_line[0][2])/2
                       running_sum_y += (a_line[0][1] + a_line[0][3])/2
-                      running_sum_disp_x += disp[0]
-                      running_sum_disp_y += disp[1]
-                      running_sum2_disp_x += disp[0] * disp[0]
-                      running_sum2_disp_y += disp[1] * disp[1]
+                      for i in range(4):
+                        running_line[i] += a_line[0][i]
                       x_dif = abs(a_line[0][0] - a_line[0][2])
                       y_dif = abs(a_line[0][1] - a_line[0][3])
                       running_line_length += sqrt(x_dif*x_dif + y_dif*y_dif)
                       running_angle += pl_angle
                       counter += 1
-                stddev_disp_x = sqrt(running_sum2_disp_x / counter - running_sum_disp_x * running_sum_disp_x / counter / counter)
-                stddev_disp_y = sqrt(running_sum2_disp_y / counter - running_sum_disp_y * running_sum_disp_y / counter / counter)
-                mean_disp_x = running_sum_disp_x / counter
-                mean_disp_y = running_sum_disp_y / counter
+                if counter == 0:
+                  print("counter:", counter)
+                  print("angle_list:", angle_list)
+                  print("pl, ds, img:", pl_num, a_ds_num, a_img_num)
+                  continue
+                if dispcnt == 0:
+                  stddev_disp_x = None
+                  stddev_disp_y = None
+                  mean_disp_x = None
+                  mean_disp_y = None
+                else:
+                  stddev_disp_x = sqrt(running_sum2_disp_x / dispcnt - running_sum_disp_x * running_sum_disp_x / dispcnt / dispcnt)
+                  stddev_disp_y = sqrt(running_sum2_disp_y / dispcnt - running_sum_disp_y * running_sum_disp_y / dispcnt / dispcnt)
+                  mean_disp_x = running_sum_disp_x / dispcnt
+                  mean_disp_y = running_sum_disp_y / dispcnt
                 mean_x = running_sum_x / counter
                 mean_y = running_sum_y / counter
                 mean_line_length = running_line_length / counter
                 mean_angle = running_angle / counter
-                print("mean disp, angle, linlen:", (mean_disp_x + mean_disp_y)/2, mean_angle, mean_line_length) 
+                mean_line = [[0,0,0,0]]
+                for i in range(4):
+                  mean_line[0][i] = int(running_line[i]/counter)
+                print("mean disp, angle, linlen:", got_disp, mean_disp_x, mean_disp_y, mean_angle, mean_line_length, mean_line, counter) 
+                persist_line_stats[pl_num] = [mean_disp_x, mean_disp_y, stddev_disp_x, stddev_disp_y, mean_x, mean_y, copy.deepcopy(mean_line), mean_line_length, mean_angle, counter, copy.deepcopy(persist_line_min_max_ds_img[pl_num])]
+                persist_line_counter.append(counter)
+                running_sum_counter += counter
+                running_sum2_counter += counter * counter
+                if got_disp and (abs(mean_disp_x) + abs(mean_disp_y) < 1):
+                  mean_gripper_line2.append(mean_line)
+                  if got_disp and (abs(mean_disp_x) + abs(mean_disp_y) < .5):
+                    mean_gripper_line1.append(mean_line)
+                    if got_disp and (abs(mean_disp_x) + abs(mean_disp_y) < .001):
+                      mean_gripper_line.append(mean_line)
+                elif got_disp:
+                  non_gripper.append(mean_line)
+                else:
+                  none_disp.append(mean_line)
+                
+                if counter > 50:
+                  big_count.append(mean_line)
+                  if max_counter < counter:
+                    max_counter = counter
+                    max_counter_num = pl_num
+              counter_cnt = len(persist_line_counter)
+              mean_counter = running_sum_counter / counter_cnt
+              stddev_counter = sqrt(running_sum2_counter / counter_cnt - running_sum_counter * running_sum_counter / counter_cnt / counter_cnt)
+              print("counter mean, stdev", mean_counter, stddev_counter)
+              # MIN_GRIPPER_Y
+              for pl_num in [max_counter_num]:
+                print("PERSIST LINE", pl_num)
+                for pl_item in persist_line[pl_num].items():
+                  pl_key, angle_list = pl_item
+                  for a_num, pl_angle in enumerate(angle_list):
+                    asd_item = angle_sd[pl_angle]
+                    a_ds_num, a_img_num, a_line = asd_item
+                    print(pl_key, a_num, a_line, persist_line_min_max_ds_img[pl_num])
+
+              # print("mean_gripper_line1", len(mean_gripper_line1))
+              # print("mean_gripper_line2", len(mean_gripper_line2))
+              # print("non_gripper_line", len(non_gripper))
+              print("none_disp", len(none_disp))
+              print("mean_gripper_line", len(mean_gripper_line))
+              display_lines("Mean_Gripper_Lines", mean_gripper_line, drop_off_img)
+              # display_lines("Mean_Gripper_Lines1", mean_gripper_line1, drop_off_img)
+              # display_lines("Mean_Gripper_Lines2", mean_gripper_line2, drop_off_img)
+              # display_lines("Mean_NonGripper_Line", non_gripper, drop_off_img)
+              display_lines("Mean_BigCount", big_count, drop_off_img)
+              cv2.waitKey(0)
+
+              mean_counter = running_sum_counter / counter_cnt
+              stddev_counter = sqrt(running_sum2_counter / counter_cnt - running_sum_counter * running_sum_counter / counter_cnt / counter_cnt)
+              print("counter mean, stdev", mean_counter, stddev_counter)
+              # MIN_GRIPPER_Y
+            pl_last_img_line = {}
+            for pl_ds_num in range(num_ds):
+              for pl_img_num in range(num_imgs):
+                bb = []
+                bb_maxw, bb_minw, bb_maxh, bb_minh = -1, 10000, -1, 10000
+                for pl_num in range(len(persist_line)):
+                  pl_stats = persist_line_stats[pl_num]
+                  if pl_stats is not None:
+                    [mean_disp_x, mean_disp_y, stddev_disp_x, stddev_disp_y, mean_x, mean_y, mean_line, mean_line_length, mean_angle, counter, [pl_min_img_num, pl_max_img_num]] = pl_stats
+                    print("PL", pl_num, counter, mean_line, pl_min_img_num, pl_max_img_num)
+                  else:
+                    continue
+                  if mean_y > MIN_GRIPPER_Y:
+                    continue
+                  if counter < mean_counter:
+                    continue
+                  a_line = None
+                  try:
+                    print("pl angle_list:")
+                    angle_list = persist_line[pl_num][(pl_ds_num, pl_img_num)]
+                    print(angle_list)
+                    l_maxw, l_minw, l_maxh, l_minh = -1, 10000, -1, 10000
+                    for a_num, pl_angle in enumerate(angle_list):
+                      asd_item = angle_sd[pl_angle]
+                      a_ds_num, a_img_num, a_line = asd_item
+                      l_maxw = max(a_line[0][0], a_line[0][2], l_maxw)
+                      l_minw = min(a_line[0][0], a_line[0][2], l_minw)
+                      l_maxh = max(a_line[0][1], a_line[0][3], l_maxh)
+                      l_minh = min(a_line[0][1], a_line[0][3], l_minh)
+                      if l_maxh > MIN_GRIPPER_Y:
+                        l_maxh = MIN_GRIPPER_Y
+                    pl_last_img_line[pl_num] = [l_maxw, l_minw, l_maxh, l_minh]
+                  except:
+                    print("except pl angle_list:")
+                    try:
+                      [l_maxw, l_minw, l_maxh, l_minh] = pl_last_img_line[pl_num]
+                    except:
+                      continue
+                  if l_maxw == -1 or l_maxh == -1:
+                    print("skipping PL", pl_num)
+                    continue
+                bb = make_bb(bb_maxw, bb_minw, bb_maxh, bb_minh)
+                img_path = img_paths[pl_ds_num][pl_img_num]
+                img = cv2.imread(img_path)
+                bb_img = get_bb_img(img, bb)
+                print(pl_img_num, "bb", bb)
+                cv2.imshow("bb", bb_img)
+                cv2.waitKey(0)
 
         x = 1/0
         cv2.waitKey(0)
@@ -1963,6 +2200,18 @@ def analyze_box_lines(box_lines, actions, gripper_img, drop_off_img):
             # estimate drop point into box
 
             # estimate position of camera
+
+def black_out_light(rl, image):
+      black = [0,0,0]
+      IMG_HW = img_sz()
+      rlmask = rl["LABEL"].copy()
+      rlmask = rlmask.reshape((IMG_HW,IMG_HW))
+
+      for h in range(image.shape[0]):
+        for w in range(image.shape[1]):
+          if 124 <= unmoved_pix[h][w] <= 255:
+            image[h, w] = black
+
 
 def black_out_gripper(unmoved_pix, image):
       ret, contour_thresh = cv2.threshold(unmoved_pix.copy(), 125, 255, 0)
@@ -2201,6 +2450,7 @@ if __name__ == '__main__':
     num_datasets = 0
     num_images = 0
     prev_func_name = ""
+    unique_color = {}
     with open(func_idx_file, 'r') as file1:
       while True:
         ds_idx = file1.readline()
@@ -2231,6 +2481,7 @@ if __name__ == '__main__':
 
     print("dataset",dataset)
     img = None
+    img_paths = []
     prev_img = None
     num_passes = 4
     box_lines = []
@@ -2251,14 +2502,41 @@ if __name__ == '__main__':
         if pass_num == 0:
           box_lines.append([])
           actions.append([])
+          img_paths.append([])
         for img_num, img_line in enumerate(reversed(ds)):
           [time, app, mode, func_name, action, img_name, img_path] = dsu.get_dataset_info(img_line,mode="FUNC") 
-          print("img_path", img_path)
+          # print("img_path", img_path)
           prev_action = action
           if img is not None:
             prev_img = img
           img = cv2.imread(img_path)
           if pass_num == 0:
+            alset_state = AlsetState()
+            cvu = CVAnalysisTools(alset_state)
+            adj_img,mean_diff,rl = cvu.adjust_light(img_path)
+            if rl is not None:
+              rl_img = img.copy()
+              mask = rl["LABEL"]==rl["LIGHT"]
+              mask = mask.reshape((rl_img.shape[:2]))
+              # print("mask",mask)
+              rl_img[mask==rl["LIGHT"]] = [0,0,0]
+              # adj_img = rl_img
+              center = np.uint8(rl["CENTER"].copy())
+              rl_copy = rl["LABEL"].copy()
+              res    = center[rl_copy.flatten()]
+              rl_img2  = res.reshape((img.shape[:2]))
+
+
+            # stego(rl_img)
+            stego_img, unique_color = stego(img, unique_color)
+            cv2.imshow("stego orig input img", img)
+            cv2.imshow("stego img", stego_img)
+            # cv2.imshow("stego adj input img", adj_img)
+            # cv2.imshow("stego input img", rl_img)
+            # cv2.imshow("stego rl img", rl_img2)
+            cv2.waitKey(0)
+
+            img_paths[ds_num].append(img_path)
             # if unmoved_pix is None:
               # gray = cv2.cvtColor(curr_img.copy(), cv2.COLOR_BGR2GRAY)
               # unmoved_pix = gray.copy()
@@ -2311,6 +2589,6 @@ if __name__ == '__main__':
             # overwrite previous attempt at getting gripper.
             box_lines[ds_num][img_num] = get_box_lines(img, gripper)
           elif pass_num == 2:
-            analyze_box_lines(box_lines, actions, gripper, slow_moved_pix)
+            analyze_box_lines(box_lines, actions, gripper, slow_moved_pix, img_paths)
             black_out_gripper(unmoved_pix, img)
 
