@@ -27,6 +27,12 @@ class ArmNavigation(object):
         plt.ion()
         self.circle_obstacles = []
         self.square_obstacles = []
+        self.line_segment_obstacles = []
+        self.delta_arm_pos = {"UPPER_ARM_UP":0,"UPPER_ARM_DOWN":0,
+                                "LOWER_ARM_UP":0,"LOWER_ARM_DOWN":0}
+        # changle in angle in radians
+        self.arm_delta = {"UPPER_ARM_UP":0.085,"UPPER_ARM_DOWN":-0.085,
+                          "LOWER_ARM_UP":-0.200,"LOWER_ARM_DOWN":0.200}
         # Arm geometry in the working space
         self.cfg = None
         self.link_length, self.link_angle_limit, self.init_link_angle, self.base = self.alset_arm()
@@ -74,6 +80,7 @@ class ArmNavigation(object):
         # self.neighbor_buffer = 10  # max allowed diff
         self.neighbor_buffer = 20   # max allowed diff
         self.arm = NLinkArm(self.link_length.copy(), self.init_link_angle, self.base)
+        self.world_arm = NLinkArm(self.link_length.copy(), self.init_link_angle, self.base)
         self.link_angle = self.init_link_angle.copy()
         # (x, y) co-ordinates in the joint space [cell]
         self.base_pos = self.base[0][0] # (0, 0)
@@ -82,21 +89,83 @@ class ArmNavigation(object):
         self.start_node = self.pos_to_node(self.start_pos)
         print("start_node:", self.start_pos, self.start_node)
         # only compute once, and make copy for each goal point
-        self.master_grid, self.grid_angles = self.get_occupancy_grid(self.arm)
-        while True:
+        self.master_grid, self.grid_angles = self.get_occupancy_grid(self.world_arm)
+        # while True:
+        if True:
           self.grid = self.master_grid.copy()
-          self.goal_pos, self.goal_node = self.get_random_goal()  
-          print("INIT goal:", self.goal_pos, self.goal_node)
-          self.route = self.astar_torus(self.circle_obstacles)
-          print("route:", self.route)
+          # self.goal_pos, self.goal_node = self.get_random_goal()  
+          self.goal_pos = None
+          self.goal_node = None
+          # print("INIT goal:", self.goal_pos, self.goal_node)
+          # self.route = self.astar_torus(self.circle_obstacles)
+          # print("route:", self.route)
 
-          if len(self.route) >= 0:
-              self.animate(self.arm, self.route, self.circle_obstacles)
+          # if len(self.route) >= 0:
+          #     self.animate(self.arm, self.route, self.circle_obstacles)
+          # cv2.waitKey(0) 
+
+        # Animate the grid point that has the most alternative angle combinations 
+        # self.animate_pivot_pt(self.arm)
+
+    def animate_random_goal(self):
+        self.goal_pos, self.goal_node = self.get_random_goal()  
+        print("INIT goal:", self.goal_pos, self.goal_node)
+        self.route = self.astar_torus(self.circle_obstacles)
+        print("route:", self.route)
+        if len(self.route) >= 0:
+          self.animate(self.arm, self.route, self.circle_obstacles)
           cv2.waitKey(0) 
-
         # Animate the grid point that has the most alternative angle combinations 
         self.animate_pivot_pt(self.arm)
     
+    ###################################
+    # ALSET WORLD: Plot the external world
+    ###################################
+    def clear_world(self):
+        self.delta_arm_pos = {"UPPER_ARM_UP":0,"UPPER_ARM_DOWN":0,
+                              "LOWER_ARM_UP":0,"LOWER_ARM_DOWN":0}
+        self.line_segment_obstacles = []
+
+    def arm_pos_to_points(self):
+        # self.arm = NLinkArm(self.link_length.copy(), self.init_link_angle, self.base)
+        uau_delta = self.arm_delta["UPPER_ARM_UP"]
+        uad_delta = self.arm_delta["UPPER_ARM_DOWN"]
+        lau_delta = self.arm_delta["LOWER_ARM_UP"]
+        lad_delta = self.arm_delta["LOWER_ARM_DOWN"]
+
+        ua_angle = self.cfg.ROBOT_ARM_INIT_ANGLES[0]
+        la_angle = self.cfg.ROBOT_ARM_INIT_ANGLES[1]
+        ga_angle = self.cfg.ROBOT_ARM_INIT_ANGLES[2]
+        ua_angle += (self.delta_arm_pos["UPPER_ARM_UP"]   * uau_delta +
+                    self.delta_arm_pos["UPPER_ARM_DOWN"] * uad_delta)
+        la_angle -= (self.delta_arm_pos["LOWER_ARM_UP"]   * lau_delta +
+                    self.delta_arm_pos["LOWER_ARM_DOWN"] * lad_delta)
+        joint_list = [ua_angle, la_angle, ga_angle]
+        self.world_arm.update_joints(joint_list)
+
+    def add_line_segment_to_world(self, line_segment):
+        self.line_segment_obstacles.append(line_segment)
+
+    def set_arm_pos(self, arm_delta):
+        self.delta_arm_pos = arm_delta
+        self.arm_pos_to_points()
+
+    def get_camera_pos(self):
+        camera_angle = self.ang_diff(np.sum(link_angle[:]), np.pi/2)
+        camera_pos = self.forward_kinematics(self.link_length, link_angle)
+        print("cam,goal angle: ", camera_angle, camera_pos)
+        return camera_angle, camera_pos
+
+    def get_camera_pov(self):
+        pass
+
+    def plot_world(self):
+        self.plot_arm(self.world_arm, goal=None, line_segments=self.line_segment_obstacles)
+
+    ###################################
+    # Plot the external world
+    ###################################
+
     def pos_to_node(self,pos):
         node = (int((pos[0]+self.plot_size)*self.grid_factor),
                 (self.M - int((pos[1]+self.plot_size)*self.grid_factor)))
@@ -208,7 +277,7 @@ class ArmNavigation(object):
             print("Animate node:", node)
             # self.get_arm_theta(node)
             plt.subplot(1, 2, 2)
-            arm.plot_arm(plt, self.goal_pos, circle_obstacles=obstacles)
+            arm.plot_arm(plt, self.goal_pos, line_segments=self.line_segment_obstacles)
             plt.xlim(-2.0, 2.0)
             plt.ylim(-3.0, 3.0)
             plt.show()
@@ -610,6 +679,122 @@ class ArmNavigation(object):
                 J[1, i] += link_lengths[j] * np.cos(np.sum(joint_angles[:j]))
         return np.linalg.pinv(J)
 
+  #################################################
+  # Public interface for setting real robot state
+  #################################################
+    def update_arm_plot(self, img=None):
+        colors = ['white', 'black', 'red', 'pink', 'yellow', 'green', 'orange', 'tan']
+        levels = [0,       1,       2,     3,      4,        5,        6,       7,    8]
+        cmap, norm = from_levels_and_colors(levels, colors)
+        if img is not None:
+          sp_cnt = 4
+        else:
+          sp_cnt = 3
+        plt.subplot(1, sp_cnt, 1)
+        # self.grid[node] = 6  # route
+        plt.cla()
+        plt.imshow(self.grid, cmap=cmap, norm=norm, interpolation=None)
+        # print("Animate node:", node)
+        # self.get_arm_theta(node)
+        plt.subplot(1, sp_cnt, (2,3))
+        self.world_arm.plot_arm(plt, self.goal_pos, line_segments=self.line_segment_obstacles)
+        # plt.xlim(-2.0, 2.0)
+        # plt.ylim(-3.0, 3.0)
+        # self.arm.plot_arm(plt, self.goal_pos, circle_obstacles=obstacles)
+        if img is not None:
+          plt.subplot(1, sp_cnt, 4)
+          plt.imshow(img)
+  
+    def set_obstacles(self, line_obstacles):
+        self.line_segment_obstacles = line_obstacles
+        update_arm_plot()
+  
+    # ground-level: y = 0
+    def set_goal_position(self, x, y):
+        ground_x1 = self.base[2][1][0]
+        ground_y  = self.base[2][1][1]
+        base_x1   = self.base[1][1][0]
+        # max dist = ground_x1 - base_x1
+        self.goal_pos = ((base_x1 + x), ground_y + y)
+        if True:
+              if img is not None:
+                sp_cnt = 3
+              else:
+                sp_cnt = 2
+              plt.subplot(1, sp_cnt, 1)
+              self.grid[node] = 6  # route
+              plt.cla()
+              plt.imshow(self.grid, cmap=cmap, norm=norm, interpolation=None)
+              print("Plot node:", node)
+              # self.get_arm_theta(node)
+              plt.subplot(1, sp_cnt, 2)
+              arm.plot_arm(plt, self.goal_pos, circle_obstacles=obstacles)
+              plt.xlim(-2.0, 2.0)
+              plt.ylim(-3.0, 3.0)
+  
+        self.world_arm.plot_arm(plt, self.goal_pos, line_segments=self.line_segment_obstacles)
+        if img is not None:
+          plt.subplot(1, sp_cnt, 3)
+          plt.imshow(img)
+  
+    def set_action_delta(self, new_arm_delta, update_plot=True):
+        # format:
+        # self.arm_delta = {"UPPER_ARM_UP":.10,"UPPER_ARM_DOWN":-.10,
+        #                   "LOWER_ARM_UP":.10,"LOWER_ARM_DOWN":-.10}
+        self.arm_delta = new_arm_delta
+        # Arm geometry in the working space
+        self.arm_pos_to_points()
+        self.update_arm_plot()
+        if update_plot:
+          self.update_arm_plot()
+  
+    def get_current_position(self, new_arm_delta):
+        return self.delta_arm_pos
+  
+    def reset_current_position(self, update_plot=True):
+        for action in ["UPPER_ARM_UP","UPPER_ARM_DOWN","LOWER_ARM_UP","LOWER_ARM_DOWN"]:
+          self.delta_arm_pos[action] = 0
+        self.arm_pos_to_points()
+        if update_plot:
+          self.update_arm_plot()
+  
+    def set_current_position(self, arm_pos, update_plot=True, img=None):
+        self.delta_arm_pos = arm_pos
+        self.arm_pos_to_points()
+        if update_plot:
+          self.update_arm_plot(img)
+  
+    def update_move(self, action, update_plot=True, img=None):
+        self.delta_arm_pos[action] += 1
+        self.arm_pos_to_points()
+        if update_plot:
+          self.update_arm_plot(img)
+  
+    def plan_next_move(self):
+        print("plan goal:", self.goal_pos, self.goal_node)
+        self.route = self.astar_torus(self.circle_obstacles)
+        print("route:", self.route)
+        for i, desired_node in enumerate(route):
+          curr_node = self.pos_to_node(self.end_effector)
+          found_action = None
+          for action in ["UPPER_ARM_UP","UPPER_ARM_DOWN","LOWER_ARM_UP","LOWER_ARM_DOWN"]:
+            backup_arm_pos = copy.deepcopy(self.delta_arm_pos)
+            proposed_arm_pos = copy.deepcopy(self.delta_arm_pos)
+            proposed_arm_pos[action] += 1
+            self.set_current_position(proposed_arm_pos, update_plot=False)
+            eff_node = self.pos_to_node(self.end_effector)
+            if eef_node == desired_node:
+              found_action = action
+              break
+          if found_action is None:
+            print("failed to find action", curr_node, eff_node)
+          else:
+            print("Found action", found_action, curr_node, eff_node)
+          # restore state
+          self.set_current_position(backup_arm_pos, update_plot=False)
+          return found_action
+  
+
 
 class NLinkArm(object):
     """
@@ -647,7 +832,9 @@ class NLinkArm(object):
                 np.sin(np.sum(self.joint_angles[:i]))
         self.end_effector = np.array(self.points[self.n_links]).T
 
-    def plot_arm(self, myplt, goal, circle_obstacles=[], square_obstacles=[]):  # pragma: no cover
+    def plot_arm(self, myplt, goal, circle_obstacles=[], square_obstacles=[], line_segments=[]):  
+        # pragma: no cover
+        # plot_world(self):
         myplt.cla()
 
         for obstacle in circle_obstacles:
@@ -661,8 +848,9 @@ class NLinkArm(object):
             myplt.gca().add_patch(square)
 
         # myplt.plot(goal[1], goal[0], 'go')
-        myplt.plot(goal[0], goal[1], 'go')
-        print("goal: ", goal)
+        if goal is not None:
+          myplt.plot(goal[0], goal[1], 'go')
+          print("goal: ", goal)
         print("points: ", self.points)
 
         # plot fixed base, ground in black
@@ -680,7 +868,8 @@ class NLinkArm(object):
         myplt.xlim([-self.lim, self.lim])
         myplt.ylim([-self.lim, self.lim])
         myplt.draw()
-        # myplt.pause(1e-5)
+        myplt.pause(1e-5)
+        # plt.pause(.5)
 
 if __name__ == '__main__':
     arm_nav = ArmNavigation()

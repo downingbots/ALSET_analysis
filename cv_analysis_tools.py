@@ -693,7 +693,7 @@ class CVAnalysisTools():
        rl["LIGHT"] = 0
       else:
        rl["LIGHT"] = 1
-      print("compactness, center, label cnt:", int(compactness), center, len([label==1]))
+      # print("compactness, center, label cnt:", int(compactness), center, len([label==1]))
       return adjusted_img, mean_dif, rl
 
 # Now convert back into uint8, and make original image

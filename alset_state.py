@@ -11,6 +11,7 @@ from yolo_dataset_util import *
 import pickle
 
 
+
 class AlsetState():
   def __init__(self):
       # CPT-based move prediction
@@ -31,7 +32,7 @@ class AlsetState():
       self.func_num  = -1
       self.frame_num = -1
       self.restart_frame_num = self.last_frame_state("FRAME_NUM")
-      print("RESTART FRAME:", self.restart_frame_num)
+      # print("RESTART FRAME:", self.restart_frame_num)
       if self.restart_frame_num is None:
         self.restart_frame_num = -1
       self.arm_state = None
@@ -668,7 +669,7 @@ class AlsetState():
         # use the best_obj_bb's postition, but the prev_obj_img for img comparison
         # best_obj_bb, best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, curr_rl, best_obj_bb, prev_obj_img, curr_img, "VERT")
 
-        # Note: Assume RL is a factor when the grippers are trying to pick up.
+        # Note: Assume RLight is a factor when the grippers are trying to pick up.
         best_obj_bb, best_obj_img, best_mse = self.binary_search_for_obj(low_val, high_val, best_obj_bb, prev_rl, prev_obj_img, curr_rl, curr_img, "VERT")
         # Was contour analysis here - but didn't work well enough
         new_obj_img = best_obj_img
