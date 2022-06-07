@@ -24,6 +24,7 @@ def add_border(img, bordersize):
     return border
 
 def replace_border(img, desired_height, desired_width, offset_height, offset_width):
+    # 224 224 225 225 0
     shape, border = real_map_border(img)
     maxw, minw, maxh, minh = get_min_max_borders(border)
     print("maxh, minh, maxw, minw :", maxh, minh, maxw, minw, desired_height, desired_width, offset_height, offset_width)
@@ -33,7 +34,6 @@ def replace_border(img, desired_height, desired_width, offset_height, offset_wid
     insert_width  = int(extract_width + 2*abs(offset_width))
     insert_img_rect = np.zeros((insert_height,insert_width,3),dtype="uint8")
     print("ext_h, ins_h, off_h:", extract_height, insert_height, offset_height)
-
     for eh in range(extract_height):
       for ew in range(extract_width):
         new_w = ew + abs(offset_width) + offset_width
@@ -343,10 +343,10 @@ def intersect_borders(border1,border2):
       max_area = 0
       if intersect.type=='MultiPolygon':
         # for x in geo.geom:
-        # for x in intersect.geom:
+        # for x in intersect:
         if dbg:
           print("intersect:", intersect)
-        for x in intersect:
+        for x in intersect.geoms:
           b = []
           b2 = []
           coordslist = list(x.exterior.coords)
@@ -445,7 +445,7 @@ def line_intersect_border(poly, pt1, pt2, ignore_pt, border):
       if dbg:
         print("len coords:", len(intersect.coords))
     elif intersect.geom_type.startswith('Multi') or intersect.geom_type == 'GeometryCollection':
-      for shp in intersect:
+      for shp in intersect.geoms:
         if dbg:
           print("shape:",shp)
         # gather together Points
@@ -527,7 +527,7 @@ def rectangle_in_border(border):
       w1 = int((border[2][0][0]+border[1][0][0]) / 2)
       # return min_h, min_w, max_h, max_w 
       print("rect in triangle: ", h0, w0, h1, w1, border)
-      x = 1/0
+      # x = 1/0
       return h0, w0, h1, w1
 
     max_area = 0
@@ -1067,9 +1067,10 @@ def get_bb_img(orig_img, bb):
         print("orig_img shape:",orig_img.shape)
         orig_maxh, orig_maxw, c = orig_img.shape
       minh = min(minh, orig_maxh)
-      minw = min(minw, orig_maxw)
+      minw = max(0,min(minw, orig_maxw))
       maxh = min(maxh, orig_maxh)
       maxw = min(maxw, orig_maxw)
+
       # print("maxh-minh, maxw-minw:",maxh-minh, maxw-minw,  maxw, minw, maxh, minh )
       if maxh<minh or maxw<minw:
         return None

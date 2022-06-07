@@ -3,6 +3,8 @@ from cv_analysis_tools import *
 from analyze_texture import *
 from dataset_utils import *
 # from cube import *
+import matplotlib.pyplot as plt
+# from distance_transform import *
 
 class AnalyzeGripper():
 
@@ -155,6 +157,10 @@ class AnalyzeGripper():
 #      for K in range(minK, maxK):
 #        pm_floor_clusters = self.cvu.color_quantification(image, K)
       image, mean_dif, rl = self.cvu.adjust_light(image_path)
+      print("lg_bb", lg_bb)
+      if len(lg_bb) == 0 or len(rg_bb) == 0:
+        print("No Safe Ground: empty gripper bb")
+        return [None, None]
       sg_minx = lg_bb[2][0][0]+1
       sg_maxx = rg_bb[0][0][0]-1 
       sg_miny = max(lg_bb[0][0][1], rg_bb[0][0][1])
@@ -162,7 +168,7 @@ class AnalyzeGripper():
       # if sg_maxx - sg_minx < 10 or sg_maxy - sg_miny < 10:
       if sg_maxx - sg_minx < 50 or sg_maxy - sg_miny < 50:
         print("No Safe Ground:", sg_minx, sg_maxx, sg_miny, sg_maxy)
-        return [None, None, None]
+        return [None, None]
     
       safe_ground_bb = [[[sg_minx, sg_miny]],[[sg_minx, sg_maxy]], [[sg_maxx, sg_maxy]], [[sg_maxx, sg_miny]]]
  
@@ -347,6 +353,8 @@ class AnalyzeGripper():
               left_gripper_bounding_box, right_gripper_bounding_box, image = self.cvu.get_gripper_bounding_box(g_mean_edges_img, curr_img)
               # cv2.imshow("mean_gripper_edges", g_mean_edges_img)
               # cv2.imshow("mean_contour", image)
+              #
+
             if curr_func_name in ["SEARCH_FOR_CUBE", "GOTO_CUBE", "PICK_UP_CUBE", "GOTO_BOX_WITH_CUBE", "DROP_CUBE_IN_BOX"]:
                 obj_nm = self.get_obj_name(curr_func_name)
                 # obj_bounding_box = self.get_object_bounding_box(left_gripper_bounding_box, right_gripper_bounding_box, curr_img)
@@ -354,6 +362,11 @@ class AnalyzeGripper():
                   print("find cube")
                   curr_img, mean_dif, rl = self.cvu.adjust_light(curr_img_path)
                   # find_cube(curr_img)
+            elif curr_func_name in ["SEARCH_FOR_BOX_WITH_CUBE", "GOTO_BOX_WITH_CUBE", "DROP_CUBE_IN_BOX"]:
+                container_nm = self.get_container_name(curr_func_name)
+                if container_nm == "BOX":
+                  curr_img, mean_dif, rl = self.cvu.adjust_light(curr_img_path)
+                  markers, src = watershed(curr_img)
 
             if action == "FORWARD":
                 # prev_img is pre-FORWARD ; curr_img is post-FORWARD 
@@ -429,3 +442,37 @@ class AnalyzeGripper():
       self.gripper_open_cnt = self.alset_state.gripper_state["GRIPPER_OPEN_COUNT"]
       self.gripper_close_cnt = self.alset_state.gripper_state["GRIPPER_CLOSED_COUNT"]
 
+  def compute_gripper_and_or(self):
+      # This algorithm needs a list or persistent state.
+      # It was fairly successful when allowed to manually tune for each run.
+      # It probably doesn't work well as a generic algorithm.
+      # Basically, you do pixel-wise ORs across a group images of a gripper in a 
+      # the same gripper position.  Then you do pixel-wise AND across different groups
+      # of ORed-images.  What is left is the common pixels for the gripper/unmoved pix.
+      #
+      # need a list of gripper images
+      compute_gripper = False
+      # num_ors = int(np.sqrt(len(edge_copy)))
+      num_ors = min(6, len(edge_copy))
+      # img_gap = len(edge_copy) // num_ors
+      # 3, 12, 13
+      print("num edge_copy", num_ors, len(edge_copy), len(ds))
+      running_ors = None
+      running_ands = None
+      do_or = 0
+      for i2 in range(2, len(edge_copy)-2):
+        if do_or == 0:
+          running_ors = cv2.bitwise_or(edge_copy[i2-1], edge_copy[i2])
+          do_or = 2
+        else:
+          running_ors = cv2.bitwise_or(running_ors, edge_copy[i2])
+          do_or += 1
+        if do_or == num_ors:
+          do_or = 0
+          if running_ands is None:
+            running_ands = running_ors
+          else:
+            running_ands = cv2.bitwise_and(running_ands, running_ors)
+      gripper = running_ands
+      cv2.imshow("running_gripper", running_ands)
+      # cv2.waitKey(0)

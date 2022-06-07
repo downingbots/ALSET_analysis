@@ -1,4 +1,5 @@
 from config import *
+from PIL import Image
 from dataset_utils import *
 from func_app import *
 from analyze_gripper import *
@@ -8,6 +9,7 @@ from analyze_map import *
 from analyze_move import *
 from analyze_clusters import *
 from alset_ratslam import *
+from alset_stego import *
 import gc
 
 class DSAnalysis():
@@ -21,6 +23,12 @@ class DSAnalysis():
       self.start_with_func_index = None
       self.cfg = Config()
       self.alset_state = AlsetState()
+      self.line_analysis = AnalyzeLines()
+      self.stego = Stego()
+      self.stego_cv_img = None 
+      self.stego_img = None
+      self.prev_stego_img = None
+      self.stego_plot_img = None
       ## find potential clusters including floor, keypoints, potential COIs, obstacles, BG movements
       ## runs YOLO9000, segmentation
       ## detailed analysis of cube
@@ -50,6 +58,9 @@ class DSAnalysis():
         self.cvu = CVAnalysisTools(self.alset_state)
         self.cvu.load_state() # note: does load automatically
         self.alset_state.load_state_completed()
+        self.line_analysis = AnalyzeLines()
+        # ARD TODO: (re)store line analysis state
+        self.line_analysis.load_state()
         state_loaded = True
       while True:
         ## predict next move
@@ -118,7 +129,7 @@ class DSAnalysis():
               else:
                 self.alset_state.increment_frame()
                 if not self.alset_state.restarting():
-                  self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state)
+                  self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state, self.stego_plot_img)
                   self.dispatch(action, state, next_state, done)
                 else:
                   print("ratslam_replay")
@@ -127,13 +138,14 @@ class DSAnalysis():
               if next_action == "REWARD1":
                 # self.alset_state.increment_frame()
                 if not self.alset_state.restarting():
-                  self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state)
+                  self.alset_state.record_frame_info(app, mode, nn_name, action, img_name, state, self.stego_plot_img)
                   self.dispatch(action, state, next_state, done)
                 done = True  # end of func is done in this mode
                 print("PFD: completed REWARD phase2", self.get_frame_num(), next_action, reward, done)
               elif next_action in ["PENALTY1", "PENALTY2"]:
                 # self.alset_state.increment_frame()
                 if not self.alset_state.restarting():
+                  prev_stego = self.stego_plot_img
                   self.dispatch(action, state, next_state, done)
                 done = True  # end of func is done in this mode
                 print("PFD: assessed run-ending PENALTY", next_action, reward, done)
@@ -193,6 +205,7 @@ class DSAnalysis():
                     done = True
                     # local_frame_num += 1  # now maintained by alset_state
                     if not self.alset_state.restarting():
+                      prev_stego = self.stego_plot_img
                       self.dispatch(action, state, next_state, done)
               run_complete = True
               print("PAD: Function flow complete", state, action, reward, next_state, done, q_val)
@@ -254,8 +267,9 @@ class DSAnalysis():
                 if not self.alset_state.restarting():
                   print("amnais:", self.app_name, mode, NN_name, action, img_name, state)
                   self.alset_state.increment_frame()
-                  self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
+                  self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state, self.stego_plot_img)
                   # the final compute reward sets done to True (see above)
+                  prev_stego = self.stego_plot_img
                   self.dispatch(action, state, next_state, done)
                   print("PAD: dispatch:", self.get_frame_num(), action, reward, done)
                 else:
@@ -264,8 +278,9 @@ class DSAnalysis():
                 if not self.alset_state.restarting():
                   print("PAD: FUNC_FLOW_REWARD4:", func_flow_reward)
                   self.alset_state.increment_frame()
-                  self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
+                  self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state, self.stego_plot_img)
                   done = True  
+                  prev_stego = self.stego_plot_img
                   self.dispatch(action, state, next_state, done)
                   print("PAD: completed REWARD phase", self.get_frame_num(), next_action, reward, done)
                 else:
@@ -276,7 +291,8 @@ class DSAnalysis():
               elif next_action in ["PENALTY1", "PENALTY2"]:
                 self.alset_state.increment_frame()
                 if not self.alset_state.restarting():
-                  self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state)
+                  self.alset_state.record_frame_info(self.app_name, mode, NN_name, action, img_name, state, self.stego_plot_img)
+                  prev_stego = self.stego_plot_img
                   self.dispatch(action, state, next_state, done)
                 if func_flow_nn_name is None:
                   done = True  
@@ -300,6 +316,14 @@ class DSAnalysis():
       self.move_analysis.train_predictions(action)
       # add_to_mean should only be True in dispatch()
       adjusted_image, mean_dif, rl = self.cvu.adjust_light(curr_img, add_to_mean=True)
+      # self.prev_stego_img = copy.deepcopy(self.stego_img)
+      # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+      # img_pil = Image.fromarray(curr_img)
+      # self.stego_cv_img, self.stego_img = self.stego.run(img_pil)
+      # print(curr_img)
+      self.stego_img = self.stego.run(adjusted_image)
+      # self.stego_cv_img, self.stego_img = self.stego.run(curr_img)
+
       try:
         print("record lighting :", self.cvu.MeanLight, mean_dif, rl["COMPACTNESS"], rl["CENTER"])
         self.alset_state.record_lighting(self.cvu.MeanLight, mean_dif, rl)
@@ -309,15 +333,48 @@ class DSAnalysis():
 
       # if action in ["GRIPPER_OPEN", "GRIPPER_CLOSE"]:
       # All frames have a gripper bounding box and need analysis
-      self.gripper_analysis.analyze(action, prev_img, curr_img, done)
+      lg_bb, rg_bb, safe_ground_bb = self.gripper_analysis.analyze(action, prev_img, adjusted_image, done)
+      if len(lg_bb) == 4 and len(rg_bb) == 4:
+        stego_gripper, stego_safe_ground = self.stego.analyze_bb(lg_bb, rg_bb, safe_ground_bb, self.stego_img)
+        if stego_gripper is not None:
+          cv2.imshow('stego_gripper', stego_gripper)
+          cv2.waitKey(0)
+        if stego_safe_ground is not None:
+          cv2.imshow('stego_safe_ground', stego_safe_ground)
+          cv2.waitKey(0)
+      else:
+        stego_gripper = None
+        stego_safe_ground = None
+
+      robot_movement = None
+      arm_movement = None
       if action.startswith("UPPER_ARM") or action.startswith("LOWER_ARM"):
-        self.arm_analysis.analyze(action, prev_img, curr_img, done, self.func_app.curr_func_name)
+        prev_adjusted_image, prev_mean_dif, prev_rl = self.cvu.adjust_light(prev_img, add_to_mean=False)
+        arm_movement = self.map_analysis.get_arm_moved_pixels(action, prev_adjusted_image, adjusted_image, done)
+        self.arm_analysis.analyze(action, arm_movement, prev_img, curr_img, self.prev_stego_img, self.stego_img, done, self.func_app.curr_func_name)
       else:
         self.alset_state.copy_prev_arm_state()
       if action in ["FORWARD","REVERSE","LEFT","RIGHT"]:
-        self.map_analysis.analyze(action, prev_img, curr_img, done)
+        prev_adjusted_image, prev_mean_dif, prev_rl = self.cvu.adjust_light(prev_img, add_to_mean=False)
+        robot_movement = self.map_analysis.analyze(action, prev_adjusted_image, adjusted_image, done, self.arm_analysis.arm_nav)
+
+      curr_plot_img = self.stego.convert_cv_to_plot(adjusted_image)
+      self.line_analysis.analyze(self.run_num, self.get_frame_num(), curr_plot_img, adjusted_image, prev_img, action, robot_movement, arm_movement, stego_gripper)
+
       self.alset_state.save_state()
       return done 
+
+# integration todo:
+#  - line analysis
+#    - handle rotations, with tracking
+#  - stego tracking objects (small polygons)
+#  - deep sort (lines, bounding boxes), estimated movement
+#  - table analysis
+#  - box analysis (goto box)
+#  - stego with cube (in gripper, on table)
+#  - add new state to alset_state
+#  - factor in get_arm_moved_pixels into position of arm (arm_nav.py)
+#    - looks like gripper is filtered in brute-force way (make pixel-level?)
 
   def get_frame_num(self):
       return self.alset_state.get_frame_num()

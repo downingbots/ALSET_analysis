@@ -59,7 +59,7 @@ from scipy.spatial import KDTree
 
 
 # RUN A RATSLAM ITERATION ==================================
-def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
+def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None, arm_nav=None):
         print("ratslam frame", vtrans, vrot)
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         slam = ALSET_SLAM
@@ -128,51 +128,14 @@ def alset_ratslam(frame, vtrans=None, vrot=None, overlay=None, armcnt=None):
         ax.get_xaxis().set_ticks([])
         ax.get_yaxis().set_ticks([])
 
-        ########################
-        # ARD: IGNORE THIS SECTION.  
-        # TODO.  The arm representation is not correct. In the process of
-        # being replaced by arm_nav.py.
-        #
-        # ARM VALUES -------------------
-        ax = plot.subplot(3, 2, 6)
-        plot.title('ARM POSITION')
-        # arm_actions = ["UPPER_ARM_UP", "UPPER_ARM_DOWN", "LOWER_ARM_UP", "LOWER_ARM_DOWN"]
-        
-        #
-        UPPER_ARM_LENGTH = 1
-        TEN_DEG = .174 - np.pi / 2
-        HORIZ_DEG = math.pi * 4 / 3 - TEN_DEG
-        UPPER_ARM_UP_ANGLE = TEN_DEG
-        UPPER_ARM_DOWN_ANGLE = TEN_DEG
-        LOWER_ARM_LENGTH = 1
-        LOWER_ARM_UP_ANGLE = TEN_DEG
-        LOWER_ARM_DOWN_ANGLE = TEN_DEG
-        base = (0,0)
-        # arm_actions = ["UPPER_ARM_UP", "UPPER_ARM_DOWN", "LOWER_ARM_UP", "LOWER_ARM_DOWN"]
-        if armcnt is None or len(armcnt) == 0:
-          angle1 = TEN_DEG
-          angle2 = HORIZ_DEG
-        else:
-          angle1 = - armcnt[0] * (UPPER_ARM_UP_ANGLE+1) - armcnt[1] * UPPER_ARM_DOWN_ANGLE 
-          angle1 = max(angle1, -TEN_DEG)
-          angle2 = armcnt[2] * LOWER_ARM_UP_ANGLE + armcnt[3] * LOWER_ARM_DOWN_ANGLE 
-          angle2 = min(angle2, HORIZ_DEG)
-
-        x1 = math.cos(angle1) * UPPER_ARM_LENGTH
-        y1 = math.sin(angle1) * UPPER_ARM_LENGTH
-        upper_arm = (x1,y1)
-        x2 = x1 + math.cos(angle2) * LOWER_ARM_LENGTH
-        y2 = y1 + math.sin(angle2) * LOWER_ARM_LENGTH
-        lower_arm = (x2,y2)
-        if armcnt is not None:
-          print("upper arm angle, x, y", angle1, x1, y1, armcnt[0], armcnt[1])
-          print("lower arm angle, x, y", angle2, x2, y2, armcnt[2], armcnt[3])
-
-        lines = [[base, upper_arm], [upper_arm, lower_arm]]
-        lc = mc.LineCollection(lines, color='black', linewidths=4)
-        ax.add_collection(lc)
-        ax.autoscale()
-        ax.margins(0.1)
+        # ARM MAP IMAGE -------------------
+        if arm_nav is not None:
+          ax = plot.subplot(3, 2, 6)
+          plot.title('ARM POSITION')
+          arm_nav.arm.plot_arm(plot, arm_nav.goal_pos, line_segments=arm_nav.line_segment_obstacles)
+ 
+          ax.autoscale()
+          ax.margins(0.1)
         ########################
         # ARD: END IGNORED SECTION.  
         ########################

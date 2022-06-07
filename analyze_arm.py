@@ -2,6 +2,7 @@ import cv2
 from cv_analysis_tools import *
 from analyze_texture import *
 from dataset_utils import *
+from arm_nav import *
 # from cube import *
 
 class AnalyzeArm():
@@ -20,10 +21,13 @@ class AnalyzeArm():
       self.alset_state = alset_state
       self.cvu = CVAnalysisTools(self.alset_state)
       self.cfg = Config()
+      self.arm_nav = ArmNavigation()
+      self.pix_moved = 0
 
-  def analyze(self, action, prev_img_path, curr_img_path, done=False, curr_func_name=None):
+  def analyze(self, action, arm_movement, prev_img_path, curr_img_path, prev_stego_img, curr_stego_img, done=False, curr_func_name=None):
       save = False 
       frame_num = self.alset_state.get_frame_num()
+      self.pix_moved, angle_moved, robot_loc = arm_movement
       arm_actions = ["UPPER_ARM_UP", "UPPER_ARM_DOWN", "LOWER_ARM_UP", "LOWER_ARM_DOWN"]
       opposite_dir = {"UPPER_ARM_UP":"UPPER_ARM_DOWN", "LOWER_ARM_UP":"LOWER_ARM_DOWN",
                       "UPPER_ARM_DOWN":"UPPER_ARM_UP", "LOWER_ARM_DOWN":"LOWER_ARM_UP"}
@@ -33,7 +37,7 @@ class AnalyzeArm():
       # UPPER_ARM_UP and LOWER_ARM_DOWN are to their maximum settings.
       print(frame_num, "Arm Analyze: func, done: ", curr_func_name, done)
       if curr_func_name == "PARK_ARM_RETRACTED" and done:
-        print("func PARK_ARM_RETRACTED done; set state to ARM_RETRACTED")
+        print("func PARK_ARM_RETRACTED done; set state to ARM_RETRACTED; pix_moved=", pix_moved)
         self.arm_state = "ARM_RETRACTED"
         for act in arm_actions:
           self.arm_cnt[act] = 0 
@@ -57,9 +61,11 @@ class AnalyzeArm():
         elif self.arm_state == "UNKNOWN":
           pass
         elif not opt_flw and self.arm_state == "ARM_RETRACTED" and action in ["UPPER_ARM_UP", "LOWER_ARM_DOWN"]:
-          self.arm_state = "ARM_RETRACTED_DELTA"
+          # self.arm_state = "ARM_RETRACTED_DELTA"
+          self.arm_state = "ARM_RETRACTED"
         elif self.arm_state == "ARM_RETRACTED" and action in ["UPPER_ARM_UP", "LOWER_ARM_DOWN"]:
-          self.arm_state = "ARM_RETRACTED_DELTA"
+          # self.arm_state = "ARM_RETRACTED_DELTA"
+          self.arm_state = "ARM_RETRACTED"
         elif not opt_flw and self.arm_state == "ARM_RETRACTED_DELTA":
           if action == "UPPER_ARM_UP":
             self.upper_arm_done = True
@@ -79,7 +85,10 @@ class AnalyzeArm():
             self.lower_arm_done = False
           self.arm_cnt[action] += 1 
           # self.arm_cnt[opposite_dir[action]] -= 1 
-        self.alset_state.set_known_robot_state(frame_num, self.arm_state)
+        self.alset_state.set_known_robot_state(frame_num, self.arm_state, self.pix_moved)
+      if self.arm_state in ["ARM_RETRACTED","ARM_RETRACTED_DELTA"]:
+        print("ARM_NAV set_current_position:", self.arm_cnt)
+        self.arm_nav.set_current_position(self.arm_cnt, update_plot=True, action=action, pixels_moved=self.pix_moved)
       self.prev_frame_num = frame_num
       self.prev_action = action
       print("arm opt_flw, uad, lad:", opt_flw, self.upper_arm_done, self.lower_arm_done)

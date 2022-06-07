@@ -31,8 +31,14 @@ class ArmNavigation(object):
         self.delta_arm_pos = {"UPPER_ARM_UP":0,"UPPER_ARM_DOWN":0,
                                 "LOWER_ARM_UP":0,"LOWER_ARM_DOWN":0}
         # changle in angle in radians
+        self.arm_delta_default = {"UPPER_ARM_UP":0.085,"UPPER_ARM_DOWN":-0.085,
+                          "LOWER_ARM_UP":-0.200,"LOWER_ARM_DOWN":0.200}
         self.arm_delta = {"UPPER_ARM_UP":0.085,"UPPER_ARM_DOWN":-0.085,
                           "LOWER_ARM_UP":-0.200,"LOWER_ARM_DOWN":0.200}
+        self.arm_delta_pix = {"UPPER_ARM_UP":0,"UPPER_ARM_DOWN":0,
+                              "LOWER_ARM_UP":0,"LOWER_ARM_DOWN":0}
+        self.arm_delta_pix_cnt = {"UPPER_ARM_UP":0, "UPPER_ARM_DOWN":0, 
+                                  "LOWER_ARM_UP":0,"LOWER_ARM_DOWN":0}
         # Arm geometry in the working space
         self.cfg = None
         self.link_length, self.link_angle_limit, self.init_link_angle, self.base = self.alset_arm()
@@ -737,11 +743,31 @@ class ArmNavigation(object):
           plt.subplot(1, sp_cnt, 3)
           plt.imshow(img)
   
-    def set_action_delta(self, new_arm_delta, update_plot=True):
-        # format:
+    def set_action_delta_pixels(self, action, pixel_delta, update_plot=True):
         # self.arm_delta = {"UPPER_ARM_UP":.10,"UPPER_ARM_DOWN":-.10,
         #                   "LOWER_ARM_UP":.10,"LOWER_ARM_DOWN":-.10}
-        self.arm_delta = new_arm_delta
+        self.arm_delta_pix[action] += pixel_delta
+        self.arm_delta_pix_cnt[action] += 1
+        M = 2/100
+        arm_delta = {}
+        for act in ["UPPER_ARM_UP","UPPER_ARM_DOWN", "LOWER_ARM_UP",
+                    "LOWER_ARM_DOWN"]:
+          if self.arm_delta_pix_cnt[act] != 0:
+            arm_delta[act]  = self.arm_delta_pix[act] / self.arm_delta_pix_cnt[act] * M
+          else:
+            arm_delta[act]  = None
+        # overwrite arm_delta with actual latest action's value
+        arm_delta[action] = pixel_delta * M
+        # arm_delta = {"UPPER_ARM_UP":0.085,"UPPER_ARM_DOWN":-0.085,
+        #              "LOWER_ARM_UP":-0.200,"LOWER_ARM_DOWN":0.200}
+        self.set_action_delta(arm_delta, update_plot=update_plot)
+
+    def set_action_delta(self, new_arm_delta, update_plot=True):
+        for action, default_val in self.arm_delta_default.items():
+          if new_arm_delta[action] is not None:
+            self.arm_delta[action] = new_arm_delta[action]
+          else:
+            self.arm_delta[action] = default_val
         # Arm geometry in the working space
         self.arm_pos_to_points()
         self.update_arm_plot()
@@ -758,9 +784,22 @@ class ArmNavigation(object):
         if update_plot:
           self.update_arm_plot()
   
-    def set_current_position(self, arm_pos, update_plot=True, img=None):
-        self.delta_arm_pos = arm_pos
-        self.arm_pos_to_points()
+    def set_current_position(self, arm_pos, update_plot=True, img=None, action = None, pixels_moved=None):
+        if action is not None and pixels_moved is not None:
+          self.set_action_delta_pixels(action, pixels_moved, update_plot=True)
+        tot_actions = 0
+        for action in ["UPPER_ARM_UP","UPPER_ARM_DOWN","LOWER_ARM_UP","LOWER_ARM_DOWN"]:
+          if self.delta_arm_pos[action] > 0:
+            tot_actions += self.delta_arm_pos[action]
+        if (tot_actions == 0 and 
+            (arm_pos["UPPER_ARM_DOWN"]==0 and arm_pos["LOWER_ARM_UP"]==0) and
+            (arm_pos["UPPER_ARM_UP"] > 0 or arm_pos["LOWER_ARM_DOWN"] > 0)):
+          # then illegal position: stay at fully ARM_RETRACTED 
+          print("ARM_RETRACTED: arm_nav limit reached")
+          self.update_arm_plot(img)
+        else:
+          self.delta_arm_pos = arm_pos
+          self.arm_pos_to_points()
         if update_plot:
           self.update_arm_plot(img)
   

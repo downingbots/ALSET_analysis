@@ -37,7 +37,7 @@ class AnalyzeMap():
         self.map_overlay = None
         #
         self.border_buffer = None   # move_img
-        self.border_multiplier = 3   # move_img
+        self.border_multiplier = 4   # move_img
         # To compute the distances,var of moves
         self.curr_move = None
         self.prev_move = None
@@ -55,11 +55,11 @@ class AnalyzeMap():
         self.cfg = Config()
         self.robot_orientation = 0  # starting point in radians
         # need to add borders to find location in map
-        self.robot_location = None
         self.robot_location_history = []
         self.robot_origin = None
         self.robot_location_from_origin = [0,0]  # starting point 
-        self.lna = LineAnalysis()
+        self.robot_location = None
+        self.lna = AnalyzeLines()
 
     def load_state(self):
         ################################################################
@@ -637,6 +637,8 @@ class AnalyzeMap():
           if mode == "ROTATE":
             curr_move = rotate_about_robot(curr_move, mse_pos, self.robot_origin)
           elif mode == "OFFSET_H" and mse_pos is not None:
+            print("OFFSET_H", curr_move.shape[0], curr_move.shape[1], int(mse_pos-self.gripper_offset_height), mse_pos, self.gripper_offset_height)
+            # 224 224 225 225 0
             curr_move = replace_border(curr_move, curr_move.shape[0], curr_move.shape[1], int(mse_pos-self.gripper_offset_height), 0)
             # curr_move = replace_border(curr_move, curr_move.shape[0], curr_move.shape[1], int(self.robot_location_from_origin[0]+mse_pos-self.gripper_offset_height), self.robot_location_from_origin[1])
             # curr_move = replace_border(curr_move, curr_move.shape[0], curr_move.shape[1], int(self.robot_origin[0]+mse_pos-self.gripper_offset_height), self.robot_origin[1])
@@ -838,21 +840,21 @@ class AnalyzeMap():
         # for mode in ["SIFT", "FEATURE", "ROOTSIFT", "ORB", "SURF"]:
         # for mode in ["SIFT", "FEATURE", "ROOTSIFT", "ORB"]:
         metrics = {"LINE":{"MSE":None},"KP":{"MSE":None},"LMS":{"MSE":None}}
-        for mode in ["LMS", "LINE", "KP"]:
+        for analyze_mode in ["LMS", "LINE", "KP"]:
           ##################################################################
-          if mode == "LINE":
+          if analyze_mode == "LINE":
             new_angle_ln = self.analyze_move_by_line(prev_frame, curr_frame, action, frame_num=0)
             print("new ln angle: ", new_angle_ln)
             print("##########################")
             new_angle = new_angle_ln
           ##################################################################
-          elif mode == "KP":
+          elif analyze_mode == "KP":
             new_angle_kp = self.analyze_move_by_kp(prev_frame, curr_frame, action, frame_num=0, kp_mode="BEST")
-            print("new kp angle: ", mode, new_angle_kp)
+            print("new kp angle: ", analyze_mode, new_angle_kp)
             print("##########################")
             new_angle = new_angle_kp
           ##################################################################
-          elif mode == "LMS":
+          elif analyze_mode == "LMS":
             # start_pos is a local prev/cur comparison, not based on
             # global positioning on map.
             if action == "LEFT":
@@ -887,7 +889,7 @@ class AnalyzeMap():
             new_angle = new_angle_lms
             print("##########################")
           ##################################################################
-          elif mode == "MANUAL":
+          elif analyze_mode == "MANUAL":
             new_angle, off_h, off_w = self.manual_tuning(frame_num)
           else:
             continue
@@ -905,17 +907,53 @@ class AnalyzeMap():
           # cv2.imshow("orig new_map:", new_map)
           # local position is equivelent to robot_origin 
           rotated_new_map = rotate_about_robot(rotated_new_map, new_angle, self.robot_origin) 
-          metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] = self.score_metrics(action, prev_map, rotated_new_map)
-          if best_mse is None or metrics[mode]["MSE"] < best_mse:
-            best_mse = metrics[mode]["MSE"]
+          metrics[analyze_mode]["MSE"], metrics[analyze_mode]["SSIM"], metrics[analyze_mode]["LBP"] = self.score_metrics(action, prev_map, rotated_new_map)
+          if best_mse is None or metrics[analyze_mode]["MSE"] < best_mse:
+            best_mse = metrics[analyze_mode]["MSE"]
             best_angle = new_angle
-            print(mode, "mse, ssim, lbp metrics: ", best_angle,
-              metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] )
-            if mode == "LMS":
+            print(analyze_mode, "mse, ssim, lbp metrics: ", best_angle,
+              metrics[analyze_mode]["MSE"], metrics[analyze_mode]["SSIM"], metrics[analyze_mode]["LBP"] )
+            if analyze_mode == "LMS":
               break
-          print(frame_num, mode, "mse: ", metrics[mode]["MSE"])
+          print(frame_num, analyze_mode, "mse: ", metrics[analyze_mode]["MSE"])
         print("ln, kp, lms angle:", new_angle_ln, new_angle_kp, new_angle_lms)
         return best_angle
+
+    def get_arm_moved_pixels(self, action, prev_frame, curr_frame, frame_num=0):
+        # start_pos is a local prev/cur comparison, not based on
+        # global positioning on map.
+        min_overlap = 10
+        if action in ["UPPER_ARM_DOWN", "LOWER_ARM_DOWN"]:
+          start_pos = curr_frame.shape[0]
+          end_pos = 0 - min_overlap
+        elif action in ["UPPER_ARM_UP", "LOWER_ARM_UP"]:
+          start_pos = curr_frame.shape[0]
+          end_pos = 0 + min_overlap
+        if self.border_buffer is None:
+          curr_move_height,curr_move_width,ch = curr_frame.shape
+          self.border_buffer = max(curr_move_height,curr_move_width)*self.border_multiplier
+        new_map = add_border(curr_frame.copy(), self.border_buffer)
+        prev_map = add_border(prev_frame.copy(), self.border_buffer)
+        print("border_buffer: ", self.border_buffer)
+        #                           None
+        # pixels_moved_mse = self.find_lmse(action, "OFFSET_H",
+        #               prev_frame, curr_frame, start_pos=start_pos,
+        #               end_pos=end_pos, frame_num=frame_num)
+        pixels_moved_mse = self.find_lmse(action, "OFFSET_H",
+                      prev_map, new_map, start_pos=start_pos,
+                      end_pos=end_pos, frame_num=frame_num)
+        pixels_moved = pixels_moved_mse
+        try:
+          new_map = replace_border(new_map, int(new_map.shape[0]), int(new_map.shape[1]), pixels_moved-self.gripper_offset_height, 0)
+        except:
+          pass
+        print("pixels_moved_mse: ", pixels_moved_mse)
+        # do arm_nav tracking here or done by caller?
+        if self.robot_location is not None:
+          arm_movement = (pixels_moved, 0, self.robot_location.copy())
+        else:
+          arm_movement = (pixels_moved, 0, None)
+        return arm_movement
 
     def analyze_fwd_rev(self, action, prev_frame, curr_frame, frame_num=0):
           #####################################################################
@@ -927,7 +965,7 @@ class AnalyzeMap():
           # If there's sufficient Keypoints, the computation is quick and
           # reasonable accurate.
           #
-          # LMSE requires somewhat expensive iterations to compute a reasonabl3
+          # LMSE requires somewhat expensive iterations to compute a reasonable
           # result.
           #####################################################################
           # initialize images and map for new move
@@ -935,21 +973,21 @@ class AnalyzeMap():
           pixels_moved_ln, pixels_moved_kp, pixels_moved_mse = None,None,None
           height,width,ch = curr_frame.shape
           metrics = {"LINE":{},"KP":{},"LMS":{}}
-          for mode in ["LMS", "LINE", "KP"]:
+          for analyze_mode in ["LMS", "LINE", "KP"]:
             ##################################################################
-            if mode == "LINE":
+            if analyze_mode == "LINE":
               pixels_moved_ln = self.analyze_move_by_line(prev_frame, curr_frame, action, frame_num=0)
               print("pixels moved by line: ", pixels_moved_ln)
               print("##########################")
               pixels_moved = pixels_moved_ln
             ##################################################################
-            elif mode == "KP":
+            elif analyze_mode == "KP":
               pixels_moved_kp = self.analyze_move_by_kp(prev_frame, curr_frame, action, frame_num=0, kp_mode="BEST")
               print("pixels_moved_kp: ", pixels_moved_kp)
               print("##########################")
               pixels_moved = pixels_moved_kp
             ##################################################################
-            elif mode == "LMS":
+            elif analyze_mode == "LMS":
               # start_pos is a local prev/cur comparison, not based on
               # global positioning on map.
               min_overlap = 10
@@ -967,7 +1005,7 @@ class AnalyzeMap():
               print("pixels_moved_mse: ", pixels_moved_mse)
               print("##########################")
             ##################################################################
-            elif mode == "MANUAL":
+            elif analyze_mode == "MANUAL":
               new_angle, off_h, off_w = self.manual_tuning(self.frame_num)
               pixels_moved = off_h
 
@@ -985,14 +1023,14 @@ class AnalyzeMap():
             except:
               continue
             prev_map = add_border(prev_frame.copy(), self.border_buffer)
-            metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] = self.score_metrics(action, prev_map, new_map)
-            print(mode, "mse, ssim, lbp metrics: ",
-              metrics[mode]["MSE"], metrics[mode]["SSIM"], metrics[mode]["LBP"] )
-            if best_mse is None or metrics[mode]["MSE"] < best_mse:
-              best_mse = metrics[mode]["MSE"]
+            metrics[analyze_mode]["MSE"], metrics[analyze_mode]["SSIM"], metrics[analyze_mode]["LBP"] = self.score_metrics(action, prev_map, new_map)
+            print(analyze_mode, "mse, ssim, lbp metrics: ",
+              metrics[analyze_mode]["MSE"], metrics[analyze_mode]["SSIM"], metrics[analyze_mode]["LBP"] )
+            if best_mse is None or metrics[analyze_mode]["MSE"] < best_mse:
+              best_mse = metrics[analyze_mode]["MSE"]
               best_move = -pixels_moved 
-              print(mode, action, "new best_move:", best_move, best_mse)
-              if mode == "LMS":
+              print(analyze_mode, action, "new best_move:", best_move, best_mse)
+              if analyze_mode == "LMS":
                 break
           print("ln, kp, lms movement:", pixels_moved_ln, pixels_moved_kp, pixels_moved_mse)
           return best_move 
@@ -1015,7 +1053,13 @@ class AnalyzeMap():
         print("new_map/map minh:", new_map_minh, map_minh)
         print("new_map/map maxh:", new_map_maxh, map_maxh)
         print("new_map/map shape:", new_map.shape, map.shape)
-        final_map = map.copy()
+        if map.shape[0] < new_map.shape[0] or map.shape[1] < new_map.shape[1]:
+          final_map_h = max(new_map.shape[0], map.shape[0])
+          final_map_w = max(new_map.shape[1], map.shape[1])
+          border_buffer = max(final_map_h, final_map_w)
+          final_map = add_border(map.copy(), border_buffer)
+        else:
+          final_map = map.copy()
         buffer = 3  # eliminate the black border at the merge points
         for h in range(new_map_minh-1, new_map_maxh-1):
           for w in range(new_map_minw-1, new_map_maxw-1):
@@ -1024,6 +1068,7 @@ class AnalyzeMap():
             # ARD: var 3
             fm_h = h + new_map_location[0]
             fm_w = w + new_map_location[1]
+            # IndexError: index 8239 is out of bounds for axis 0 with size 8239
             if final_map[fm_h,fm_w].all() == 0:
               final_map[fm_h,fm_w] = new_map[h,w]
             elif new_map[h,w].all() == 0:
@@ -1084,7 +1129,7 @@ class AnalyzeMap():
     # CREATE MAP - main map driver routine
     #################################
 
-    def analyze(self, action, prev_img_pth, curr_img_pth, done):
+    def analyze(self, action, prev_img_pth, curr_img_pth, done, arm_nav=None):
         # curr_image = cv2.imread(curr_img_pth)
         self.frame_num = self.alset_state.get_frame_num()
         curr_image,mean_diff,rl = self.cvu.adjust_light(curr_img_pth)
@@ -1121,6 +1166,8 @@ class AnalyzeMap():
           self.border_buffer = max(curr_move_height,curr_move_width)*self.border_multiplier
           print("border buffer:", self.border_buffer)
           self.map = add_border(self.curr_move.copy(), self.border_buffer)
+          self.border_buffer = max(curr_move_height,curr_move_width)*self.border_multiplier
+          print("border buffer:", self.border_buffer)
           self.map_overlay = self.map.copy()
           map_height,map_width = self.map.shape[:2]
 
@@ -1155,10 +1202,12 @@ class AnalyzeMap():
             best_angle = self.find_best_rotation(action, self.prev_move,
                             self.curr_move, self.frame_num)
             print("Final Best Angle: ", best_angle)
+            best_move = None
           elif action in ["FORWARD","REVERSE"]:
             best_move = self.analyze_fwd_rev(action, self.prev_move,
                             self.curr_move, self.frame_num)
             print("Final Best Move: ", best_move)  # in pixels
+            best_angle = None
 
           ###########################
           # Global Location and Orientation
@@ -1233,11 +1282,11 @@ class AnalyzeMap():
           armcnt = self.alset_state.get_arm_cnt()
           if action in ["LEFT", "RIGHT"]:
             if best_angle is not None:
-              alset_ratslam(curr_image, 0, best_angle, overlay, armcnt)
+              alset_ratslam(curr_image, 0, best_angle, overlay, armcnt, arm_nav)
           elif action in ["FORWARD", "REVERSE"]:
             if best_move is not None:
-              alset_ratslam(curr_image, -best_move, 0, overlay, armcnt)
-          return 
+              alset_ratslam(curr_image, -best_move, 0, overlay, armcnt, arm_nav)
+          return [best_move, best_angle, self.robot_location]
 
     def alset_ratslam_replay(self):
         action = self.alset_state.last_frame_state("ACTION")
