@@ -18,6 +18,10 @@
 #
 # And:
 # alset_dqn.py
+# 
+# Takes the ALSET datasets for functional apps and DQN on a real robot, 
+# and converts them into a ATARI-compatible dataset appropriate to be 
+# loaded into a GPT model for reinforcement learning.
 
 import csv
 # import sys
